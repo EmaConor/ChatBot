@@ -1,262 +1,146 @@
-"""
-clientes_db.py
-
-Módulo para gestionar clientes con TinyDB.
-Cambios principales:
-- El login se realiza con (numero, cedula).
-- La cédula se almacena hasheada (cedula_hash) junto con un salt único por usuario.
-- Las funciones que devuelven clientes devuelven una copia "sanitizada" (sin cedula_hash ni salt).
-Funciones públicas:
-- init_db(path)
-- register_client(nombre, numero, direccion, cedula, id_cliente=None)
-- get_client_by_numero(numero)  # devuelve cliente sin campos sensibles
-- get_client_raw_by_numero(numero)  # devuelve cliente con todos los campos (solo si lo necesitas)
-- authenticate_by_cedula(numero, cedula) -> devuelve cliente (sanitizado) si ok, else None
-- update_direccion(numero, nueva_direccion)
-- update_nombre(numero, nuevo_nombre)
-- update_numero(numero_actual, nuevo_numero)
-- update_cedula(numero, nueva_cedula)
-- delete_cliente(numero)
-- list_clients()  # lista sanitizada
-- next_id()
-"""
-
 from tinydb import TinyDB, Query
-from tinydb.operations import set as tiny_set
-import hashlib
-import os
-from typing import Optional, Dict, Any, List
-import copy
+import hashlib, uuid, os
 
-# Estado interno del módulo
-_db: Optional[TinyDB] = None
-_table_name = "clientes"
+# === CONFIGURACIÓN DE LA BASE DE DATOS ===
+# El archivo se crea automáticamente en la misma carpeta del script
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "clientes.json")
+
+db = TinyDB(DB_PATH)
+clientes_table = db.table("clientes")
 
 
-# ---------- Inicialización ----------
-def init_db(filename: str = "clientes.json"):
+# === FUNCIÓN PARA HASHEAR LA CÉDULA ===
+def hash_cedula(cedula: str, salt: str = None):
     """
-    Inicializa la base de datos TinyDB en la misma carpeta donde está este archivo.
+    Crea un hash SHA256 de la cédula con un salt único.
+    Devuelve (hash, salt)
     """
-    global _db
-    if _db is None:
-        # Carpeta actual del archivo clientes_db.py
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        db_path = os.path.join(current_dir, filename)
-        _db = TinyDB(db_path, indent=4)
-    return _db
+    if not salt:
+        salt = uuid.uuid4().hex
+    hash_obj = hashlib.sha256((cedula + salt).encode("utf-8"))
+    return hash_obj.hexdigest(), salt
 
 
-# ---------- Hash de cédula ----------
-def _generate_salt() -> str:
-    return os.urandom(16).hex()
-
-
-def _hash_cedula(cedula: str, salt: str) -> str:
+# === FUNCIÓN PARA AGREGAR CLIENTES ===
+def agregar_cliente(nombre: str, numero: str, direccion: str, cedula: str):
     """
-    Hash con SHA-256 de (salt + cedula).
+    Agrega un nuevo cliente si el número no existe.
+    Guarda la cédula de forma segura (hash + salt).
     """
-    return hashlib.sha256((salt + str(cedula)).encode('utf-8')).hexdigest()
-
-
-# ---------- Helpers ----------
-def _table():
-    if _db is None:
-        raise RuntimeError("Base de datos no inicializada. Llama a init_db(path) primero.")
-    return _db.table(_table_name)
-
-
-def _sanitize_cliente(cliente: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Devuelve una copia del cliente sin campos sensibles (cedula_hash, salt).
-    """
-    cliente_copy = copy.deepcopy(cliente)
-    cliente_copy.pop('cedula_hash', None)
-    cliente_copy.pop('salt', None)
-    return cliente_copy
-
-
-def next_id() -> int:
-    """
-    Devuelve un id único incremental para clientes (1,2,3,...).
-    """
-    tbl = _table()
-    all_clients = tbl.all()
-    if not all_clients:
-        return 1
-    max_id = 0
-    for c in all_clients:
-        try:
-            cid = int(c.get('id', 0))
-            if cid > max_id:
-                max_id = cid
-        except (ValueError, TypeError):
-            continue
-    return max_id + 1
-
-
-# ---------- CRUD y Autenticación (con cédula hasheada) ----------
-def register_client(nombre: str, numero: str, direccion: str, cedula: str, id_cliente: Optional[int] = None) -> bool:
-    """
-    Registra un cliente. Si id_cliente es None, se genera automáticamente.
-    La cédula se guarda hasheada (cedula_hash) y se guarda el salt.
-    Devuelve True si se insertó, False si ya existe (por numero o id).
-    """
-    tbl = _table()
     Cliente = Query()
-    numero = str(numero)
-
-    # Revisar existencia por número o id
-    if id_cliente is not None:
-        if tbl.search(Cliente.id == id_cliente):
-            return False
-
-    if tbl.search(Cliente.numero == numero):
+    existente = clientes_table.get(Cliente.numero == numero)
+    if existente:
+        print("⚠️ Ya existe un cliente con ese número.")
         return False
 
-    if id_cliente is None:
-        id_cliente = next_id()
+    cedula_hash, salt = hash_cedula(cedula)
+    nuevo_id = len(clientes_table) + 1
 
-    salt = _generate_salt()
-    cedula_hash = _hash_cedula(cedula, salt)
-
-    tbl.insert({
-        'id': id_cliente,
-        'nombre': nombre,
-        'numero': numero,
-        'direccion': direccion,
-        'cedula_hash': cedula_hash,
-        'salt': salt
+    clientes_table.insert({
+        "id": nuevo_id,
+        "nombre": nombre,
+        "numero": numero,
+        "direccion": direccion,
+        "cedula_hash": cedula_hash,
+        "salt": salt
     })
+
+    print(f"✅ Cliente '{nombre}' agregado correctamente.")
     return True
 
 
-def get_client_raw_by_numero(numero: str) -> Optional[Dict[str, Any]]:
+# === FUNCIÓN PARA INICIAR SESIÓN ===
+def iniciar_sesion(numero: str, cedula: str):
     """
-    Devuelve el documento tal cual (incluye cedula_hash y salt).
-    Úsalo solo internamente o si necesitas los campos sensibles.
+    Verifica si el número y la cédula coinciden con los datos almacenados (hash + salt).
     """
-    tbl = _table()
     Cliente = Query()
-    numero = str(numero)
-    res = tbl.search(Cliente.numero == numero)
-    return res[0] if res else None
+    cliente = clientes_table.get(Cliente.numero == numero)
 
-
-def get_client_by_numero(numero: str) -> Optional[Dict[str, Any]]:
-    """
-    Devuelve el cliente pero SIN cedula_hash ni salt.
-    """
-    raw = get_client_raw_by_numero(numero)
-    return _sanitize_cliente(raw) if raw else None
-
-
-def authenticate_by_cedula(numero: str, cedula: str) -> Optional[Dict[str, Any]]:
-    """
-    Verifica que el numero exista y que la cédula ingresada coincida con el hash guardado.
-    Si es correcto, devuelve el cliente sanitizado; si no, devuelve None.
-    """
-    cliente = get_client_raw_by_numero(numero)
     if not cliente:
-        return None
-    salt = cliente.get('salt')
-    stored_hash = cliente.get('cedula_hash')
-    if not salt or not stored_hash:
-        return None
-    if _hash_cedula(cedula, salt) == stored_hash:
-        return _sanitize_cliente(cliente)
-    return None
-
-
-def update_direccion(numero: str, nueva_direccion: str) -> bool:
-    tbl = _table()
-    Cliente = Query()
-    numero = str(numero)
-    if tbl.search(Cliente.numero == numero):
-        tbl.update(tiny_set('direccion', nueva_direccion), Cliente.numero == numero)
-        return True
-    return False
-
-
-def update_nombre(numero: str, nuevo_nombre: str) -> bool:
-    tbl = _table()
-    Cliente = Query()
-    numero = str(numero)
-    if tbl.search(Cliente.numero == numero):
-        tbl.update(tiny_set('nombre', nuevo_nombre), Cliente.numero == numero)
-        return True
-    return False
-
-
-def update_numero(numero_actual: str, nuevo_numero: str) -> bool:
-    """
-    Cambia el número del cliente. Verifica que nuevo_numero no exista ya.
-    """
-    tbl = _table()
-    Cliente = Query()
-    numero_actual = str(numero_actual)
-    nuevo_numero = str(nuevo_numero)
-
-    if tbl.search(Cliente.numero == nuevo_numero):
-        # nuevo número ya está en uso
+        print("❌ Número no encontrado.")
         return False
 
-    if tbl.search(Cliente.numero == numero_actual):
-        tbl.update(tiny_set('numero', nuevo_numero), Cliente.numero == numero_actual)
+    # Verificar el hash con el salt guardado
+    cedula_hash_verif = hashlib.sha256((cedula + cliente["salt"]).encode("utf-8")).hexdigest()
+    if cedula_hash_verif == cliente["cedula_hash"]:
+        print(f"✅ Inicio de sesión exitoso. Bienvenido, {cliente['nombre']}.")
         return True
-    return False
+    else:
+        print("❌ Cédula incorrecta.")
+        return False
 
 
-def update_cedula(numero: str, nueva_cedula: str) -> bool:
+# === FUNCIÓN PARA LISTAR TODOS LOS CLIENTES ===
+def listar_clientes():
     """
-    Actualiza la cédula (genera nuevo salt y nuevo hash).
+    Devuelve y muestra todos los clientes almacenados.
     """
-    tbl = _table()
+    clientes = clientes_table.all()
+    if not clientes:
+        print("📭 No hay clientes registrados.")
+        return []
+
+    print("\n📋 Lista de clientes:")
+    for c in clientes:
+        print(f" - ID: {c['id']} | Nombre: {c['nombre']} | Número: {c['numero']} | Dirección: {c['direccion']}")
+    print()
+    return clientes
+
+
+# === FUNCIÓN PARA BUSCAR UN CLIENTE POR NÚMERO ===
+def buscar_cliente(numero: str):
+    """
+    Busca un cliente por su número de celular.
+    """
     Cliente = Query()
-    numero = str(numero)
-    if tbl.search(Cliente.numero == numero):
-        salt = _generate_salt()
-        cedula_hash = _hash_cedula(nueva_cedula, salt)
-        tbl.update({'salt': salt, 'cedula_hash': cedula_hash}, Cliente.numero == numero)
-        return True
-    return False
+    cliente = clientes_table.get(Cliente.numero == numero)
+    if cliente:
+        print(f"🔎 Cliente encontrado: {cliente['nombre']} - Dirección: {cliente['direccion']}")
+        return cliente
+    else:
+        print("❌ Cliente no encontrado.")
+        return None
 
 
-def delete_cliente(numero: str) -> bool:
-    tbl = _table()
+# === FUNCIÓN PARA ELIMINAR UN CLIENTE ===
+def eliminar_cliente(numero: str):
+    """
+    Elimina un cliente de la base de datos por su número.
+    """
     Cliente = Query()
-    numero = str(numero)
-    if tbl.search(Cliente.numero == numero):
-        tbl.remove(Cliente.numero == numero)
+    eliminado = clientes_table.remove(Cliente.numero == numero)
+    if eliminado:
+        print(f"🗑️ Cliente con número {numero} eliminado correctamente.")
         return True
-    return False
+    else:
+        print("❌ No se encontró ningún cliente con ese número.")
+        return False
 
 
-def list_clients() -> List[Dict[str, Any]]:
-    """
-    Lista todos los clientes en forma sanitizada.
-    """
-    tbl = _table()
-    return [_sanitize_cliente(c) for c in tbl.all()]
-
-
-# ---------- Demo pequeño (opcional) ----------
+# === PRUEBA DEL MÓDULO ===
 if __name__ == "__main__":
-    init_db("clientes_demo.json")
+    print("=== PRUEBA DE FUNCIONALIDAD ===")
 
-    print("Generando demo (cédula hasheada)...")
-    register_client("Yoan Valdés", "3001234567", "Calle 10 #5-22", "1234567890")
-    register_client("Laura Pérez", "3109876543", "Carrera 7 #20-14", "1087654321")
+    # Agregar clientes
+    agregar_cliente("Yoan Valdés", "3001234567", "Calle Nueva #8-10", "123456789")
+    agregar_cliente("Laura Gómez", "3009876543", "Carrera 5 #9-20", "987654321")
 
-    print("Todos (sanitizados):", list_clients())
-    print("Buscar por número:", get_client_by_numero("3001234567"))
+    # Listar
+    listar_clientes()
 
-    print("Autenticar correcto (3001234567, 1234567890):", authenticate_by_cedula("3001234567", "1234567890") is not None)
-    print("Autenticar incorrecto (3001234567, 0000):", authenticate_by_cedula("3001234567", "0000") is None)
+    # Buscar
+    buscar_cliente("3009876543")
 
-    update_direccion("3001234567", "Calle Nueva #8-10")
-    update_cedula("3001234567", "9999999999")
-    print("Después de cambios (nota: cédula actualizada):", get_client_by_numero("3001234567"))
+    # Iniciar sesión correcta
+    iniciar_sesion("3009876543", "987654321")
 
-    delete_cliente("3109876543")
-    print("Final:", list_clients())
+    # Iniciar sesión incorrecta
+    iniciar_sesion("3009876543", "000000000")
+
+    # Eliminar
+    #eliminar_cliente("3009876543")
+
+    # Listar después de eliminar
+    listar_clientes()
