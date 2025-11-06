@@ -12,6 +12,7 @@ PHONE_NUMBER_ID = "863285753529334"
 # CUANDO RECIBAMOS LAS PETICIONES EN ESTA RUTA
 @app.route("/webhook/", methods=["POST", "GET"])
 def webhook_whatsapp():
+    
     # SI HAY DATOS RECIBIDOS VIA GET (para verificación inicial)
     if request.method == "GET":
         if request.args.get('hub.verify_token') == "HolaNovato":

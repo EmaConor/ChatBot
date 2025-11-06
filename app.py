@@ -70,7 +70,7 @@ def webhook_whatsapp():
         enviar_mensaje(telefonoCliente, reply)
 
     # --- Enviar el PDF después del mensaje ---
-        PDF_URL = "https://drive.google.com/file/d/1sOJG5CMtzuLsl-0CLoghExJQAz5JiPAt/view?pli=1" 
+        PDF_URL = "https://github.com/EmaConor/ChatBot/blob/main/Resources/CARTA%20MEZON%20PERUANO%202025.pdf" 
         NOMBRE_ARCHIVO = "menu.pdf"
         enviar_pdf(telefonoCliente, PDF_URL, NOMBRE_ARCHIVO)
         return jsonify({"status": "menu"}), 200

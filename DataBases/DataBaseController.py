@@ -122,23 +122,26 @@ def eliminar_cliente(numero: str):
 
 # === PRUEBA DEL MÓDULO ===
 if __name__ == "__main__":
-    print("=== PRUEBA DE FUNCIONALIDAD ===")
+
+    
+    #print("=== PRUEBA DE FUNCIONALIDAD ===")
 
     # Agregar clientes
-    agregar_cliente("Yoan Valdes", "3001234567", "Calle Nueva #8-10", "123456789")
-    agregar_cliente("Laura Gómez", "3009876543", "Carrera 5 #9-20", "987654321")
+    #agregar_cliente("Yoan Valdes", "573001234567", "Calle Nueva #8-10", "123456789")
+    #agregar_cliente("Laura Gómez", "573009876543", "Carrera 5 #9-20", "987654321")
 
     # Listar
-    listar_clientes()
+    #listar_clientes()
 
     # Buscar
-    buscar_cliente("3009876543")
+    
+    #buscar_cliente("573009876543")
 
     # Iniciar sesión correcta
-    iniciar_sesion("3009876543", "987654321")
+    #iniciar_sesion("573009876543", "987654321")
 
     # Iniciar sesión incorrecta
-    iniciar_sesion("3009876543", "000000000")
+    #iniciar_sesion("573009876543", "000000000")
 
     # Eliminar
     #eliminar_cliente("3009876543")
