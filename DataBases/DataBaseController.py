@@ -8,6 +8,7 @@ DB_PATH = os.path.join(BASE_DIR, "clientes.json")
 
 db = TinyDB(DB_PATH)
 clientes_table = db.table("clientes")
+menu_table = db.table("menu")
 
 
 # === FUNCIÓN PARA HASHEAR LA CÉDULA ===
@@ -124,7 +125,7 @@ if __name__ == "__main__":
     print("=== PRUEBA DE FUNCIONALIDAD ===")
 
     # Agregar clientes
-    agregar_cliente("Yoan Valdés", "3001234567", "Calle Nueva #8-10", "123456789")
+    agregar_cliente("Yoan Valdes", "3001234567", "Calle Nueva #8-10", "123456789")
     agregar_cliente("Laura Gómez", "3009876543", "Carrera 5 #9-20", "987654321")
 
     # Listar
