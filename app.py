@@ -6,7 +6,7 @@ import os
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
-TOKEN = "EAApdsnrt0rUBP1ZArDPgSKn8WWAZApJviUtBnBJwjJIceBaTBHkm5NZAkUI1Nf5ZALj9ZCGwAC97QVgOjNuQ1qVtkZBj2CxZBtsDvSn03D77cQZBwmtC8GZADVOYLNNayhjSzk2HhkyzdhSa5HilNyCPzcXmUPgdryuQFQNhE8udRatoCIc84geHPDylvqdPG2iZAF5sWjdOBbeFORzypBRByrNz2iCw1Rclxm4Qb0XjVpu00LVXNkNLZB0WiHuZCZAzrfnJ8TimAcsoJRF0J8nmvQ6FVBAZDZD"
+TOKEN = "EAApdsnrt0rUBP4hDyvp5KJEUQWIP7Xh8ZCwpQ1r72wPyPoCQtA93a8XKYZBa5h7kFa64cUUqtzZCdH7oAoHqpCJXPxMjEfCSjjcKPfmQZAosX3Yr4DNQTjIKs7OsZAWq6ovwBaTjkVT37QdEVcQQMkfiKKpNcJIYzQZCoZAcoFMhF0NB4uR3TIdBy6qOouZB4ID0rYsvGOadXTjIVqG1ok7Pf8cew0IhzvzPHDuc4Or6ecEkRGYkZBWzSFDKtjCroSRGcgoXi8ZBk06BEONCa0qt2ilwZDZD"
 PHONE_NUMBER_ID = "863285753529334"
 
 # === CARRITO EN MEMORIA ===
@@ -59,8 +59,20 @@ def webhook_whatsapp():
     if text in ['menu', '1', 'ver menu', 'ver menú'] or user['stage'] == 'start':
         user['stage'] = 'browsing'
         CARTS[telefonoCliente] = user
-        reply = "📋 *MENÚ DISPONIBLE:*\n\n" + format_menu() + "\n\n👉 Usa: *Agregar <id> <cantidad>*\nEjemplo: Agregar 2 1"
+
+        # --- Mensaje de texto del menú ---
+        reply = (
+        "📋 *MENÚ DISPONIBLE:*\n\n"
+        + format_menu()
+        + "\n\n👉 Usa: *Agregar <id> <cantidad>*\nEjemplo: Agregar 2 1"
+    )
+
         enviar_mensaje(telefonoCliente, reply)
+
+    # --- Enviar el PDF después del mensaje ---
+        PDF_URL = "https://drive.google.com/file/d/1sOJG5CMtzuLsl-0CLoghExJQAz5JiPAt/view?pli=1" 
+        NOMBRE_ARCHIVO = "menu.pdf"
+        enviar_pdf(telefonoCliente, PDF_URL, NOMBRE_ARCHIVO)
         return jsonify({"status": "menu"}), 200
 
     # === AGREGAR ITEM ===
@@ -163,7 +175,24 @@ def enviar_mensaje(numero, texto):
     response = requests.post(url, headers=headers, json=data)
     print(f"→ Enviado a {numero}: {texto}")
     print("Status:", response.status_code, response.text)
-
+# === FUNCIÓN PARA ENVIAR PDF A WHATSAPP ===
+def enviar_pdf(numero, pdf_url, nombre_archivo):
+    #"""Envía un archivo PDF por WhatsApp."""
+    url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {TOKEN}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "messaging_product": "whatsapp",
+        "to": numero,
+        "type": "document",
+        "document": {
+            "link": pdf_url,
+            "filename": nombre_archivo
+        }
+    }
+    requests.post(url, headers=headers, json=data)
 
 # === INICIAR FLASK ===
 if __name__ == "__main__":
