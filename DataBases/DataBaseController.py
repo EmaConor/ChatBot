@@ -2,7 +2,6 @@ from tinydb import TinyDB, Query
 import hashlib, uuid, os
 
 # === CONFIGURACIÓN DE LA BASE DE DATOS ===
-# El archivo se crea automáticamente en la misma carpeta del script
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "clientes.json")
 
@@ -13,10 +12,6 @@ menu_table = db.table("menu")
 
 # === FUNCIÓN PARA HASHEAR LA CÉDULA ===
 def hash_cedula(cedula: str, salt: str = None):
-    """
-    Crea un hash SHA256 de la cédula con un salt único.
-    Devuelve (hash, salt)
-    """
     if not salt:
         salt = uuid.uuid4().hex
     hash_obj = hashlib.sha256((cedula + salt).encode("utf-8"))
@@ -25,10 +20,6 @@ def hash_cedula(cedula: str, salt: str = None):
 
 # === FUNCIÓN PARA AGREGAR CLIENTES ===
 def agregar_cliente(nombre: str, numero: str, direccion: str, cedula: str):
-    """
-    Agrega un nuevo cliente si el número no existe.
-    Guarda la cédula de forma segura (hash + salt).
-    """
     Cliente = Query()
     existente = clientes_table.get(Cliente.numero == numero)
     if existente:
@@ -53,9 +44,6 @@ def agregar_cliente(nombre: str, numero: str, direccion: str, cedula: str):
 
 # === FUNCIÓN PARA INICIAR SESIÓN ===
 def iniciar_sesion(numero: str, cedula: str):
-    """
-    Verifica si el número y la cédula coinciden con los datos almacenados (hash + salt).
-    """
     Cliente = Query()
     cliente = clientes_table.get(Cliente.numero == numero)
 
@@ -63,11 +51,10 @@ def iniciar_sesion(numero: str, cedula: str):
         print("❌ Número no encontrado.")
         return False
 
-    # Verificar el hash con el salt guardado
     cedula_hash_verif = hashlib.sha256((cedula + cliente["salt"]).encode("utf-8")).hexdigest()
     if cedula_hash_verif == cliente["cedula_hash"]:
         print(f"✅ Inicio de sesión exitoso. Bienvenido, {cliente['nombre']}.")
-        return True
+        return cliente  # ← Cambiado para retornar el objeto cliente completo
     else:
         print("❌ Cédula incorrecta.")
         return False
@@ -75,9 +62,6 @@ def iniciar_sesion(numero: str, cedula: str):
 
 # === FUNCIÓN PARA LISTAR TODOS LOS CLIENTES ===
 def listar_clientes():
-    """
-    Devuelve y muestra todos los clientes almacenados.
-    """
     clientes = clientes_table.all()
     if not clientes:
         print("📭 No hay clientes registrados.")
@@ -92,9 +76,6 @@ def listar_clientes():
 
 # === FUNCIÓN PARA BUSCAR UN CLIENTE POR NÚMERO ===
 def buscar_cliente(numero: str):
-    """
-    Busca un cliente por su número de celular.
-    """
     Cliente = Query()
     cliente = clientes_table.get(Cliente.numero == numero)
     if cliente:
@@ -107,9 +88,6 @@ def buscar_cliente(numero: str):
 
 # === FUNCIÓN PARA ELIMINAR UN CLIENTE ===
 def eliminar_cliente(numero: str):
-    """
-    Elimina un cliente de la base de datos por su número.
-    """
     Cliente = Query()
     eliminado = clientes_table.remove(Cliente.numero == numero)
     if eliminado:
@@ -118,6 +96,51 @@ def eliminar_cliente(numero: str):
     else:
         print("❌ No se encontró ningún cliente con ese número.")
         return False
+
+
+# === 💡 NUEVA FUNCIÓN: ACTUALIZAR CLIENTE POR ID O CÉDULA ===
+def actualizar_cliente(identificador, cedula_verificacion, nuevos_datos: dict):
+    """
+    Actualiza la información de un cliente buscándolo por ID o verificando su cédula.
+    nuevos_datos puede contener: {"nombre": "...", "numero": "...", "direccion": "..."}
+    """
+    Cliente = Query()
+    cliente = None
+
+    # Buscar por ID (si es numérico)
+    if isinstance(identificador, int):
+        cliente = clientes_table.get(Cliente.id == identificador)
+    else:
+        # Buscar por cédula (recalculando el hash con cada salt guardado)
+        for c in clientes_table.all():
+            cedula_hash_verif = hashlib.sha256((cedula_verificacion + c["salt"]).encode("utf-8")).hexdigest()
+            if cedula_hash_verif == c["cedula_hash"]:
+                cliente = c
+                break
+
+    if not cliente:
+        print("❌ Cliente no encontrado.")
+        return False
+
+    # Verificar que la cédula ingresada corresponda
+    cedula_hash_verif = hashlib.sha256((cedula_verificacion + cliente["salt"]).encode("utf-8")).hexdigest()
+    if cedula_hash_verif != cliente["cedula_hash"]:
+        print("❌ La cédula no coincide. No se puede actualizar.")
+        return False
+
+    # Actualizar datos válidos
+    actualizacion = {}
+    for campo in ["nombre", "numero", "direccion"]:
+        if campo in nuevos_datos:
+            actualizacion[campo] = nuevos_datos[campo]
+
+    if not actualizacion:
+        print("⚠️ No se proporcionaron campos válidos para actualizar.")
+        return False
+
+    clientes_table.update(actualizacion, Cliente.id == cliente["id"])
+    print(f"✅ Cliente '{cliente['nombre']}' actualizado correctamente.")
+    return True
 
 
 # === PRUEBA DEL MÓDULO ===

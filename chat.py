@@ -7,12 +7,13 @@ import re
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
-TOKEN = "EAApdsnrt0rUBP6SK65wClfiC0sc567779pr5mZBLuy7zFQHd2vqmyLXVtp9PqhLLj8Iq0399bV2mMZArS9KKZCjZCNsECtOiqILIEpo9qGKhgr3tP4P2rmSMFH2T4jc6l1ZALNiAkPzsq3uDd9sjJhxhGtfC0ksuBH7Y2hA5GrMjZBRoZCC5PQM33oor3sXZBycwiAalnKU7QjAH7dRKF5cfjEYmc2kOOnqfikYOrxYsZB44jotxBkgLTq3jkStcbkf5zbR1ExZAXyopAEast2UMZC0"
+TOKEN = "EAApdsnrt0rUBP45WWo8wwVZCIaPcM3iN4M3tuiprRtPgANA7fWm4uZCb909t8MCFh3kbo4Y16fSZBWeZC0dClw3enMUc8nAXUBBBwJrZCeNTlmWJaobHDwINQhACfmQGYCC63dpW5ylSkAEwdKOEFTxAKIXwSUMEQYZBxMhVroF45r54NUbLYWuLnT0Fdx1a5qFaEHr30l9ff87ddxvZCLj9u4eYbOWUnYw9OA1EijGySIorPa0ge35P4kOgBVNKdH3T6vRv2wxODcbx5qbK3eauAZDZD"
 PHONE_NUMBER_ID = "863285753529334"
 
 # === BASE DE DATOS TEMPORAL DE USUARIOS ===
 USUARIOS = {}  # {telefono: {"etapa": "pidiendo_nombre", "nombre": "", "direccion": "", "cedula": ""}}
 LOGIN_ATTEMPTS = {}  # {telefono: intentos}
+SESIONES_ACTIVAS = {}  # {telefono: {"id_usuario": id, "cedula": cedula, "nombre": nombre}}
 
 # === FUNCIÓN DE REGISTRO ===
 def agregar_cliente(nombre, tel, direccion, cedula):
@@ -29,14 +30,19 @@ def iniciar_sesion(tel, cedula):
     try:
         cliente = DB.iniciar_sesion(tel, cedula)
         if cliente:
-            print(f"🟢 Inicio de sesión exitoso para: {tel}")
-            return True, "¡Inicio de sesión exitoso! 🎉"
+            # Obtener información completa del cliente
+            cliente_completo = DB.buscar_cliente(tel)
+            if cliente_completo:
+                print(f"🟢 Inicio de sesión exitoso para: {tel}")
+                return True, "¡Inicio de sesión exitoso! 🎉", cliente_completo
+            else:
+                return False, "❌ Error al obtener información del usuario.", None
         else:
             print(f"🔴 Fallo en inicio de sesión para: {tel}")
-            return False, "❌ Credenciales incorrectas. Verifica tu número y cédula."
+            return False, "❌ Credenciales incorrectas. Verifica tu número y cédula.", None
     except Exception as e:
         print(f"🔴 Error en inicio de sesión: {e}")
-        return False, "❌ Error del sistema. Intenta más tarde."
+        return False, "❌ Error del sistema. Intenta más tarde.", None
 
 # === VALIDACIÓN DE CÉDULA ===
 def validar_cedula(cedula):
@@ -102,6 +108,46 @@ def enviar_menu(numero):
         print(f"🔴 Error enviando menú: {e}")
         return False
 
+# === ENVIAR MENÚ DE USUARIO LOGUEADO ===
+def enviar_menu_logueado(numero, nombre_usuario=None):
+    try:
+        url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
+        headers = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+        
+        saludo = f"👋 Hola {nombre_usuario}" if nombre_usuario else "👋 Hola"
+        
+        data = {
+            "messaging_product": "whatsapp",
+            "to": numero,
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "header": {"type": "text", "text": "🎉 ¡Sesión Activa!"},
+                "body": {"text": f"{saludo}\n\nSelecciona una opción:"},
+                "footer": {"text": "Sesión iniciada - ChatBot"},
+                "action": {
+                    "button": "Opciones",
+                    "sections": [
+                        {
+                            "title": "Menú de Usuario",
+                            "rows": [
+                                {"id": "cerrar_sesion", "title": "🚪 Cerrar sesión", "description": "Salir de tu cuenta"},
+                                {"id": "actualizar_datos", "title": "✏️ Actualizar datos", "description": "Modificar tu información"},
+                                {"id": "menu_principal", "title": "🏠 Menú principal", "description": "Volver al menú inicial"},
+                                {"id": "informacion", "title": "ℹ️ Mi información", "description": "Ver tus datos personales"}
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+        response = requests.post(url, headers=headers, json=data)
+        print(f"→ Menú logueado enviado a {numero}")
+        return response.status_code == 200
+    except Exception as e:
+        print(f"🔴 Error enviando menú logueado: {e}")
+        return False
+
 # === ENVIAR MENSAJE DE BIENVENIDA AL LOGUEARSE ===
 def enviar_bienvenida_logueado(numero, nombre_usuario=None):
     mensaje = "🎉 *¡Bienvenido de nuevo!*\n\n"
@@ -109,14 +155,41 @@ def enviar_bienvenida_logueado(numero, nombre_usuario=None):
         mensaje += f"👋 Hola *{nombre_usuario}*\n\n"
     
     mensaje += "✅ *Sesión iniciada correctamente*\n\n"
-    mensaje += "Ahora puedes:\n"
-    mensaje += "• 📋 Ver tu perfil\n"
-    mensaje += "• 🍽️ Hacer pedidos\n"
-    mensaje += "• 📊 Ver historial\n"
-    mensaje += "• ⚙️ Configurar preferencias\n\n"
-    mensaje += "Escribe *menu* en cualquier momento para ver las opciones."
+    mensaje += "Ahora puedes acceder a funciones exclusivas:\n"
+    mensaje += "• 📋 Ver y actualizar tu perfil\n"
+    mensaje += "• 🍽️ Hacer pedidos (próximamente)\n"
+    mensaje += "• 📊 Ver historial (próximamente)\n"
+    mensaje += "• ⚙️ Gestionar tu cuenta\n\n"
+    mensaje += "Usa el menú interactivo para navegar."
     
     enviar_mensaje(numero, mensaje)
+    # Enviar menú de usuario logueado después del mensaje de bienvenida
+    enviar_menu_logueado(numero, nombre_usuario)
+
+# === ACTUALIZAR DATOS DEL USUARIO ===
+def actualizar_datos_usuario(telefono, nuevos_datos):
+    try:
+        if telefono not in SESIONES_ACTIVAS:
+            return False, "❌ No hay sesión activa."
+        
+        sesion = SESIONES_ACTIVAS[telefono]
+        id_usuario = sesion["id_usuario"]
+        cedula = sesion["cedula"]
+        
+        # Actualizar en la base de datos
+        success = DB.actualizar_cliente(id_usuario, cedula, nuevos_datos)
+        
+        if success:
+            # Actualizar sesión local si el nombre fue modificado
+            if "nombre" in nuevos_datos:
+                SESIONES_ACTIVAS[telefono]["nombre"] = nuevos_datos["nombre"]
+            return True, "✅ Datos actualizados correctamente."
+        else:
+            return False, "❌ Error al actualizar los datos."
+            
+    except Exception as e:
+        print(f"🔴 Error actualizando datos: {e}")
+        return False, "❌ Error del sistema al actualizar."
 
 # === WEBHOOK PRINCIPAL ===
 @app.route("/webhook/", methods=["POST", "GET"])
@@ -143,6 +216,76 @@ def webhook_whatsapp():
 
     print(f"📱 Mensaje de {telefono}: {mensaje}")
 
+    # === MANEJO DE USUARIOS LOGUEADOS ===
+    if telefono in SESIONES_ACTIVAS:
+        if mensaje in ["cerrar_sesion", "5"]:
+            nombre_usuario = SESIONES_ACTIVAS[telefono]["nombre"]
+            del SESIONES_ACTIVAS[telefono]
+            enviar_mensaje(telefono, f"👋 *Hasta pronto, {nombre_usuario}!*\n\nTu sesión ha sido cerrada correctamente.")
+            enviar_menu(telefono)
+            return jsonify({"status": "sesion cerrada"}), 200
+
+        elif mensaje in ["actualizar_datos", "6"]:
+            enviar_mensaje(telefono, "✏️ *Actualizar Datos*\n\nPor favor ingresa los nuevos datos en el formato:\n\n*Nombre:Nuevo nombre\nDirección:Nueva dirección*\n\nEjemplo:\nNombre:Juan Pérez\nDirección:Calle 123 #45-67")
+            USUARIOS[telefono] = {"etapa": "actualizando_datos"}
+            return jsonify({"status": "actualizando datos"}), 200
+
+        elif mensaje in ["menu_principal", "7"]:
+            enviar_menu(telefono)
+            return jsonify({"status": "menu principal"}), 200
+
+        elif mensaje in ["informacion", "8"]:
+            sesion = SESIONES_ACTIVAS[telefono]
+            info_msg = f"📋 *Tu Información*\n\n"
+            info_msg += f"👤 *Nombre:* {sesion['nombre']}\n"
+            info_msg += f"📞 *Teléfono:* {telefono}\n"
+            info_msg += f"🆔 *ID de usuario:* {sesion['id_usuario']}\n"
+            info_msg += f"📝 *Cédula:* {sesion['cedula']}\n\n"
+            info_msg += "Para actualizar tus datos, selecciona 'Actualizar datos' en el menú."
+            enviar_mensaje(telefono, info_msg)
+            return jsonify({"status": "informacion mostrada"}), 200
+
+        else:
+            # Si el usuario está logueado pero envía otro mensaje, mostrar menú logueado
+            enviar_menu_logueado(telefono, SESIONES_ACTIVAS[telefono]["nombre"])
+            return jsonify({"status": "menu logueado"}), 200
+
+    # === MANEJO DE ACTUALIZACIÓN DE DATOS ===
+    if telefono in USUARIOS and USUARIOS[telefono]["etapa"] == "actualizando_datos":
+        # Procesar actualización de datos
+        lineas = mensaje.split('\n')
+        nuevos_datos = {}
+        
+        for linea in lineas:
+            if ':' in linea:
+                clave, valor = linea.split(':', 1)
+                clave = clave.strip().lower()
+                valor = valor.strip()
+                
+                if clave == "nombre" and len(valor) >= 2:
+                    nuevos_datos["nombre"] = valor.title()
+                elif clave == "dirección" or clave == "direccion":
+                    if len(valor) >= 5:
+                        nuevos_datos["direccion"] = valor
+                    else:
+                        enviar_mensaje(telefono, "❌ La dirección debe tener al menos 5 caracteres.")
+                        return jsonify({"status": "direccion invalida"}), 200
+        
+        if nuevos_datos:
+            success, mensaje_respuesta = actualizar_datos_usuario(telefono, nuevos_datos)
+            enviar_mensaje(telefono, mensaje_respuesta)
+            
+            if success:
+                # Actualizar el nombre en la sesión si fue modificado
+                if "nombre" in nuevos_datos:
+                    SESIONES_ACTIVAS[telefono]["nombre"] = nuevos_datos["nombre"]
+        else:
+            enviar_mensaje(telefono, "❌ No se proporcionaron datos válidos para actualizar.")
+        
+        del USUARIOS[telefono]
+        enviar_menu_logueado(telefono, SESIONES_ACTIVAS[telefono]["nombre"])
+        return jsonify({"status": "actualizacion procesada"}), 200
+
     # === MANEJO DE INICIO DE SESIÓN ===
     if telefono in USUARIOS and USUARIOS[telefono]["etapa"] == "iniciando_sesion":
         cedula = mensaje
@@ -153,10 +296,16 @@ def webhook_whatsapp():
             return jsonify({"status": "invalid cedula"}), 200
         
         # Intentar inicio de sesión
-        success, mensaje_respuesta = iniciar_sesion(telefono, cedula)
+        success, mensaje_respuesta, cliente = iniciar_sesion(telefono, cedula)
         
-        if success:
-            enviar_bienvenida_logueado(telefono)
+        if success and cliente:
+            # Guardar sesión activa con ID y cédula
+            SESIONES_ACTIVAS[telefono] = {
+                "id_usuario": cliente["id"],
+                "cedula": cedula,
+                "nombre": cliente["nombre"]
+            }
+            enviar_bienvenida_logueado(telefono, cliente["nombre"])
             # Limpiar estado
             del USUARIOS[telefono]
             if telefono in LOGIN_ATTEMPTS:
