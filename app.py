@@ -62,7 +62,7 @@ def webhook_whatsapp():
 
         # --- Mensaje de texto del menú ---
         reply = (
-        "📋 *MENÚ DISPONIBLE:*\n\n"
+        "📋 Aquí tienes nuestro *menú completo* 👇Descubre todos los platos y bebidas que tenemos para ti.¡Seguro encontrarás tu favorito! 😋\n\n"
         + format_menu()
         + "\n\n👉 Usa: *Agregar <id> <cantidad>*\nEjemplo: Agregar 2 1"
     )
