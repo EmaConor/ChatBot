@@ -134,8 +134,11 @@ def enviar_menu(numero):
                             "rows": [
                                 {"id": "1", "title": "🔐 Iniciar sesión", "description": "Accede a tu cuenta existente"},
                                 {"id": "2", "title": "📝 Registrarse", "description": "Crea una nueva cuenta"},
-                                {"id": "3", "title": "🍽️ Ver menú", "description": "Consulta nuestros productos"},
-                                {"id": "4", "title": "ℹ️ Información", "description": "Conoce más sobre nosotros"}
+                                {"id": "3", "title": "🍛 Ver menú completo", "description": "Explora nuestros platos típicos y encuentra tu favorito."},
+                                {"id": "4", "title": "💸 Ver promociones del día", "description": "¡No te pierdas nuestras ofertas especiales!"},
+                                {"id": "5", "title": "🕓 Horarios de atención", "description": "Consulta cuándo estamos disponibles para atenderte."},
+                                {"id": "6", "title": "📍 Ver dirección o contacto", "description": "Encuentra nuestra ubicación y medios de contacto."},
+                                {"id": "7", "title": "🧑‍💼 Hablar con un experto", "description": "¿Tienes dudas? Nuestro equipo está listo para ayudarte por chat."}
                             ]
                         }
                     ]
@@ -317,10 +320,10 @@ def webhook_whatsapp():
                     if clave == "nombre" and len(valor) >= 2:
                         nuevos_datos["nombre"] = valor.title()
                     elif clave in ["dirección", "direccion"]:
-                        if len(valor) >= 5:
+                        if len(valor) >= 7:
                             nuevos_datos["direccion"] = valor
                         else:
-                            enviar_mensaje(telefono, "❌ La dirección debe tener al menos 5 caracteres.")
+                            enviar_mensaje(telefono, "❌ La dirección debe tener al menos 7 caracteres.")
                             return jsonify({"status": "direccion invalida"}), 200
             
             if nuevos_datos:
@@ -430,7 +433,7 @@ def webhook_whatsapp():
                 return jsonify({"status": "registro completo"}), 200
 
         # === MENSAJE DE BIENVENIDA ===
-        if mensaje in ["hola", "hi", "hello", "menú", "menu", "opciones"]:
+        if mensaje in ["hola", "hi", "hello", "menú", "menu", "opciones","buenas"]:
             enviar_menu(telefono)
             return jsonify({"status": "menu"}), 200
 
@@ -441,7 +444,7 @@ def webhook_whatsapp():
             return jsonify({"status": "login started"}), 200
 
         elif mensaje == "2":  # Registrarse
-            enviar_mensaje(telefono, "📝 *Registro de Nuevo Usuario*\n\nPor favor escribe tu *nombre completo*:")
+            enviar_mensaje(telefono, "📝 *Registro de Nuevo Usuario*\n\n🕵️️ *Nombre completo*:\n¿Cómo te gustaría que te llame?")
             USUARIOS[telefono] = {"etapa": "pidiendo_nombre"}
             return jsonify({"status": "registro inicio"}), 200
 
@@ -449,9 +452,21 @@ def webhook_whatsapp():
             enviar_mensaje(telefono, "🍽️ *Nuestro Menú*\n\n🔸 Pizza Margarita - $12\n🔸 Pizza Pepperoni - $14\n🔸 Lasagna - $10\n🔸 Ensalada César - $8\n\nPróximamente podrás hacer pedidos directamente.")
             return jsonify({"status": "ver menu"}), 200
 
-        elif mensaje == "4":  # Información
-            enviar_mensaje(telefono, "ℹ️ *Información*\n\nSomos un restaurante familiar con más de 10 años de experiencia. Usa este chatbot para registrarte, iniciar sesión y pronto hacer pedidos.\n\n📍 Dirección: Calle Principal #123\n📞 Teléfono: +1-234-567-8900\n🕒 Horario: 9AM - 10PM")
-            return jsonify({"status": "info"}), 200
+        elif mensaje == "4":  # Promociones
+            enviar_mensaje(telefono, "💸 *Ver promociones del día*\n\nPróximamente ")
+            return jsonify({"status": "Promos"}), 200
+        
+        elif mensaje == "5":  # Horarios de atención
+            enviar_mensaje(telefono, "🕓 *Horarios de atención*\n\nPróximamente ")
+            return jsonify({"status": "horarios"}), 200
+        
+        elif mensaje == "6":  # Dirección o contacto
+            enviar_mensaje(telefono, "📍 *Ver dirección o contacto*\n\nPróximamente ")
+            return jsonify({"status": "docontato"}), 200
+        
+        elif mensaje == "6":  # Hablar con un experto
+            enviar_mensaje(telefono, "🧑‍💼 *Hablar con un experto*\n\nPróximamente ")
+            return jsonify({"status": "hexperto"}), 200
 
         # === FALLBACK ===
         enviar_mensaje(telefono, "🤖 No entendí tu mensaje. Escribe *hola* o *menu* para ver las opciones disponibles.")
