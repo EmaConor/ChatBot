@@ -276,6 +276,7 @@ def webhook_whatsapp():
 
         print(f"📱 Mensaje de {telefono}: {mensaje}")
 
+
         # === MANEJO DE USUARIOS LOGUEADOS ===
         if telefono in SESIONES_ACTIVAS:
             if mensaje in ["cerrar_sesion", "5"]:
