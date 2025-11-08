@@ -54,11 +54,20 @@ def limpiar_estado_usuario(telefono):
     if telefono in LOGIN_ATTEMPTS:
         del LOGIN_ATTEMPTS[telefono]
 
+def usuario_ya_registrado(telefono):
+    """Verifica si un usuario ya está registrado"""
+    try:
+        cliente = DB.buscar_cliente(telefono)
+        return cliente is not None
+    except Exception as e:
+        print(f"🔴 Error verificando usuario: {e}")
+        return False
+
 # === FUNCIÓN DE REGISTRO CORREGIDA ===
 def agregar_cliente(nombre, tel, direccion, cedula):
     try:
-        cliente_existente = DB.buscar_cliente(tel)
-        if cliente_existente:
+        # VERIFICAR SI EL USUARIO YA EXISTE
+        if usuario_ya_registrado(tel):
             return False, 'El usuario ya está registrado'
         
         DB.agregar_cliente(nombre, tel, direccion, cedula)
@@ -424,7 +433,20 @@ def webhook_whatsapp():
 ¡Bienvenido a nuestro sistema! 🎉"""
                     enviar_mensaje(telefono, mensaje_exito)
                 else:
-                    enviar_mensaje(telefono, f"❌ {mensaje_respuesta}")
+                    if "ya está registrado" in mensaje_respuesta:
+                        mensaje_error = f"""❌ *Usuario ya registrado*
+
+📞 El número {tel} ya se encuentra registrado en nuestro sistema.
+
+Si ya tienes una cuenta, puedes:
+• 🔐 Iniciar sesión con tu cédula
+• ✏️ Actualizar tus datos si necesitas modificarlos
+
+Si olvidaste tu cédula, contacta con soporte."""
+                        enviar_mensaje(telefono, mensaje_error)
+                        enviar_menu(telefono)
+                    else:
+                        enviar_mensaje(telefono, f"❌ {mensaje_respuesta}")
                 
                 del USUARIOS[telefono]
                 return jsonify({"status": "registro completo"}), 200
@@ -441,8 +463,21 @@ def webhook_whatsapp():
             return jsonify({"status": "login started"}), 200
 
         elif mensaje == "2":  # Registrarse
-            enviar_mensaje(telefono, "📝 *Registro de Nuevo Usuario*\n\nPor favor escribe tu *nombre completo*:")
-            USUARIOS[telefono] = {"etapa": "pidiendo_nombre"}
+            # VERIFICAR SI EL USUARIO YA ESTÁ REGISTRADO ANTES DE INICIAR EL PROCESO
+            if usuario_ya_registrado(telefono):
+                enviar_mensaje(telefono, f"""❌ *Ya estás registrado*
+
+📞 El número {telefono} ya tiene una cuenta en nuestro sistema.
+
+Por favor selecciona:
+• 🔐 *Iniciar sesión* - Si ya tienes una cuenta
+• ✏️ *Actualizar datos* - Si necesitas modificar tu información (después de iniciar sesión)
+
+Si olvidaste tu cédula, contacta con soporte.""")
+                enviar_menu(telefono)
+            else:
+                enviar_mensaje(telefono, "📝 *Registro de Nuevo Usuario*\n\nPor favor escribe tu *nombre completo*:")
+                USUARIOS[telefono] = {"etapa": "pidiendo_nombre"}
             return jsonify({"status": "registro inicio"}), 200
 
         elif mensaje == "3":  # Ver menú
