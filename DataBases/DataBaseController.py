@@ -98,7 +98,7 @@ def eliminar_cliente(numero: str):
         return False
 
 
-# === 💡 NUEVA FUNCIÓN: ACTUALIZAR CLIENTE POR ID O CÉDULA ===
+# === FUNCIÓN PARA ACTUALIZAR CLIENTE POR ID O CÉDULA ===
 def actualizar_cliente(identificador, cedula_verificacion, nuevos_datos: dict):
     """
     Actualiza la información de un cliente buscándolo por ID o verificando su cédula.
@@ -142,6 +142,98 @@ def actualizar_cliente(identificador, cedula_verificacion, nuevos_datos: dict):
     print(f"✅ Cliente '{cliente['nombre']}' actualizado correctamente.")
     return True
 
+#=== FUNCIÓN PARA ACTUALIZAR NOMBRE ===
+def actualizar_nombre_cliente(numero: str, nuevo_nombre: str, cedula_verificacion: str):
+    try:
+        Cliente = Query()
+        cliente = clientes_table.get(Cliente.numero == numero)
+        
+        if not cliente:
+            print("❌ Cliente no encontrado.")
+            return False
+        
+        # Verificar cédula
+        cedula_hash_verif = hashlib.sha256((cedula_verificacion + cliente["salt"]).encode("utf-8")).hexdigest()
+        if cedula_hash_verif != cliente["cedula_hash"]:
+            print("❌ La cédula no coincide. No se puede actualizar.")
+            return False
+        
+        # Actualizar nombre
+        clientes_table.update({"nombre": nuevo_nombre}, Cliente.id == cliente["id"])
+        print(f"✅ Nombre actualizado correctamente: {cliente['nombre']} -> {nuevo_nombre}")
+        return True
+        
+    except Exception as e:
+        print(f"🔴 Error en actualizar_nombre_cliente: {e}")
+        return False
+
+# === FUNCIÓN PARA ACTUALIZAR DIRECCIÓN ===
+def actualizar_direccion_cliente(numero: str, nueva_direccion: str, cedula_verificacion: str):
+    """
+    Actualiza solo la dirección de un cliente
+    """
+    print(f"{numero},{nueva_direccion},{cedula_verificacion}")
+    Cliente = Query()
+    cliente = clientes_table.get(Cliente.numero == numero)
+    
+    if not cliente:
+        print("❌ Cliente no encontrado.")
+        return False
+    
+    # Verificar cédula
+    cedula_hash_verif = hashlib.sha256((cedula_verificacion + cliente["salt"]).encode("utf-8")).hexdigest()
+    if cedula_hash_verif != cliente["cedula_hash"]:
+        print("❌ La cédula no coincide. No se puede actualizar.")
+        return False
+    
+    # Actualizar dirección
+    clientes_table.update({"direccion": nueva_direccion}, Cliente.id == cliente["id"])
+    print(f"✅ Dirección actualizada correctamente para {cliente['nombre']}")
+    return True
+
+# === FUNCIÓN PARA ACTUALIZAR CÉDULA ===
+def actualizar_cedula_cliente(numero: str, nueva_cedula: str, cedula_actual: str):
+    """
+    Actualiza la cédula de un cliente
+    """
+    Cliente = Query()
+    cliente = clientes_table.get(Cliente.numero == numero)
+    
+    if not cliente:
+        print("❌ Cliente no encontrado.")
+        return False
+    
+    # Verificar cédula actual
+    cedula_hash_verif = hashlib.sha256((cedula_actual + cliente["salt"]).encode("utf-8")).hexdigest()
+    if cedula_hash_verif != cliente["cedula_hash"]:
+        print("❌ La cédula actual no coincide. No se puede actualizar.")
+        return False
+    
+    # Generar nuevo hash para la nueva cédula
+    nuevo_cedula_hash, nuevo_salt = hash_cedula(nueva_cedula)
+    
+    # Actualizar cédula y salt
+    clientes_table.update({
+        "cedula_hash": nuevo_cedula_hash,
+        "salt": nuevo_salt
+    }, Cliente.id == cliente["id"])
+    
+    print(f"✅ Cédula actualizada correctamente para {cliente['nombre']}")
+    return True
+
+# === FUNCIÓN PARA OBTENER CÉDULA ACTUAL (para verificación) ===
+def verificar_cedula_cliente(numero: str, cedula_ingresada: str):
+    """
+    Verifica si la cédula ingresada coincide con la almacenada
+    """
+    Cliente = Query()
+    cliente = clientes_table.get(Cliente.numero == numero)
+    
+    if not cliente:
+        return False
+    
+    cedula_hash_verif = hashlib.sha256((cedula_ingresada + cliente["salt"]).encode("utf-8")).hexdigest()
+    return cedula_hash_verif == cliente["cedula_hash"]
 
 # === PRUEBA DEL MÓDULO ===
 if __name__ == "__main__":
@@ -170,4 +262,5 @@ if __name__ == "__main__":
     #eliminar_cliente("3009876543")
 
     # Listar después de eliminar
+    #actualizar_direccion_cliente("573012331635", "calle 45 bcspn", "1033179153")
     listar_clientes()

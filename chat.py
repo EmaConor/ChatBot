@@ -1,89 +1,158 @@
-# ChatBot con registro e inicio de sesión en WhatsApp - VERSIÓN CORREGIDA
-from flask import Flask, jsonify, request
-import DataBases.DataBaseController as DB
+# ChatBot con menús interactivos (select box) en WhatsApp
+from flask import Flask, jsonify, request, redirect
+import DataBases.dataBaseController as BDC
+import DataBases.productsController as DBP
 import requests
 import re
 import html
+import time
+from datetime import datetime, time as dt_time
+import pytz
 
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
-TOKEN = "EAApdsnrt0rUBP6YlYiYa3ozyZCjwZBM4asPbha5DbfciRFYDJA9mtxjUUElElwA31cjry0p0Y9qDuoZACqOL1c153MnmThRMgvbJ0VK81CkAJIl0IQuT2r44ZBQC0hCZC6bUO0ejTa3ZBknoEau38ezC0pUihZBQIaxNmxyPukiZCZAaG6fhxFoqIY91YqR9PYOb1ocHD3YOZBDXLO5SDEfQ9aNuVJw8hqv0fIZCCynDcW0pA0kAfc2q4zRvZARRZBMrfE82czPQF3DUz6fI7ug2x2C4m"
+TOKEN = "EAApdsnrt0rUBPz5pqCZCDjGoz1AnMmmxOshZB5nRKa0FgOH8OXHVsYez4dEjjvnPVyLzddVazQSZCnULKzCf557RqJ9NiOPTrFdgCx4IzL5xaBZBTOggHy3TDlZAzfJ8lEFMClZA2f1ZAa6lSyLT1hzLYtKwNKKLfYlflesKZBEOXDWejxZCAPjgZBL377P25tF6asC5b3YqFAhtwaKTAAil4P1KPuDToIArYd2YIha0cD7EwX1dlYtlkcPZBMLKG6f5dDw5yF4YLebbDuqqnBZC6R1y"
 PHONE_NUMBER_ID = "863285753529334"
 
-# === BASE DE DATOS TEMPORAL DE USUARIOS ===
-USUARIOS = {}  # {telefono: {"etapa": "pidiendo_nombre", "nombre": "", "direccion": "", "cedula": ""}}
-LOGIN_ATTEMPTS = {}  # {telefono: intentos}
-SESIONES_ACTIVAS = {}  # {telefono: {"id_usuario": id, "cedula": cedula, "nombre": nombre}}
+# === BASE DE DATOS TEMPORAL ===
+USUARIOS = {}
+LOGIN_ATTEMPTS = {}
+SESIONES_ACTIVAS = {}
 
-# === FUNCIONES DE UTILIDAD ===
+# === RUTAS BÁSICAS ===
+@app.route('/')
+def home():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>🤖 ChatBot WhatsApp Interactivo - Mezón Peruano</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            h1 { color: #25D366; }
+            .status { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0; }
+            .feature { background: #f0f0f0; padding: 15px; border-radius: 5px; margin: 10px 0; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🤖 ChatBot WhatsApp Interactivo - Mezón Peruano</h1>
+            
+            <div class="status">
+                <strong>✅ Servidor funcionando con menús interactivos</strong>
+                <p>Hora del servidor: """ + time.strftime("%Y-%m-%d %H:%M:%S") + """</p>
+            </div>
+            
+            <div class="feature">
+                <h3>✨ Características Interactivas:</h3>
+                <ul>
+                    <li>📋 Menús con botones de selección (Select Box)</li>
+                    <li>🎯 Navegación intuitiva con listas interactivas</li>
+                    <li>🔐 Registro e inicio de sesión interactivo</li>
+                    <li>⚙️ Gestión de sesiones con menús dinámicos</li>
+                </ul>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+@app.route('/status')
+def status():
+    return jsonify({
+        "status": "active",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "interactive_menus": "enabled",
+        "statistics": {
+            "users_in_registration": len(USUARIOS),
+            "active_sessions": len(SESIONES_ACTIVAS),
+            "login_attempts_tracking": len(LOGIN_ATTEMPTS)
+        }
+    })
+
+@app.route('/health')
+def health_check():
+    return jsonify({"status": "healthy", "service": "whatsapp-interactive-chatbot"})
+
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204
+
+@app.route('/webhook')
+def webhook_redirect():
+    return redirect('/webhook/', code=301)
+
+# === CONFIGURACIÓN DE HORARIO ===
+HORARIO_APERTURA = dt_time(9, 0)   # 9:00 AM
+HORARIO_CIERRE = dt_time(22, 0)    # 10:00 PM
+ZONA_HORARIA = pytz.timezone('America/Bogota')
+
+def esta_en_horario_servicio():
+    """Verifica si el chatbot está en horario de servicio"""
+    ahora = datetime.now(ZONA_HORARIA)
+    hora_actual = ahora.time()
+    return HORARIO_APERTURA <= hora_actual <= HORARIO_CIERRE
+
+def enviar_mensaje_fuera_horario(numero):
+    """Envía mensaje cuando está fuera del horario de atención"""
+    mensaje = """🚫 *Fuera del Horario de Atención*
+
+🕒 *Horario de Atención:*
+📅 Lunes a Domingo
+⏰ 9:00 AM - 10:00 PM
+
+Actualmente no estamos en horario de servicio. 
+Nuestro equipo te atenderá tan pronto como volvamos.
+
+¡Gracias por tu comprensión! 🙏"""
+    return enviar_mensaje(numero, mensaje)
+
+# === FUNCIONES DE VALIDACIÓN ===
 def sanitizar_texto(texto):
-    """Sanitiza el texto para prevenir inyecciones y normaliza espacios"""
-    texto = html.escape(texto)  # Prevenir XSS
+    texto = html.escape(texto)
     texto = texto.strip()
-    texto = re.sub(r'\s+', ' ', texto)  # Normalizar espacios múltiples
-    return texto[:100]  # Limitar longitud
+    texto = re.sub(r'\s+', ' ', texto)
+    return texto[:100]
 
 def validar_cedula(cedula):
-    """Valida cédula ecuatoriana con algoritmo de verificación"""
-    if not cedula.isdigit() or len(cedula) != 10:
+    if not cedula.isdigit():
         return False
-    
-    # Validar que los primeros dos dígitos sean válidos (provincia)
-    provincia = int(cedula[:2])
-    if provincia < 1 or provincia > 24:
-        return False
-    
-    # Algoritmo de validación para cédula ecuatoriana
-    coeficientes = [2, 1, 2, 1, 2, 1, 2, 1, 2]
-    total = 0
-    
-    for i in range(9):
-        valor = int(cedula[i]) * coeficientes[i]
-        if valor >= 10:
-            valor -= 9
-        total += valor
-    
-    digito_verificador = (10 - (total % 10)) % 10
-    return digito_verificador == int(cedula[9])
+    if 6 <= len(cedula) <= 10:
+        return True
+    return False
 
 def limpiar_estado_usuario(telefono):
-    """Limpia el estado del usuario en caso de error"""
     if telefono in USUARIOS:
         del USUARIOS[telefono]
     if telefono in LOGIN_ATTEMPTS:
         del LOGIN_ATTEMPTS[telefono]
 
 def usuario_ya_registrado(telefono):
-    """Verifica si un usuario ya está registrado"""
     try:
-        cliente = DB.buscar_cliente(telefono)
+        cliente = BDC.buscar_cliente(telefono)
         return cliente is not None
     except Exception as e:
         print(f"🔴 Error verificando usuario: {e}")
         return False
 
-# === FUNCIÓN DE REGISTRO CORREGIDA ===
 def agregar_cliente(nombre, tel, direccion, cedula):
     try:
-        # VERIFICAR SI EL USUARIO YA EXISTE
         if usuario_ya_registrado(tel):
             return False, 'El usuario ya está registrado'
-        
-        DB.agregar_cliente(nombre, tel, direccion, cedula)
-        print(f"🟢 Cliente registrado:\nNombre: {nombre}\nTeléfono: {tel}\nDirección: {direccion}\nCédula: {cedula}")
+        BDC.agregar_cliente(nombre, tel, direccion, cedula)
+        print(f"🟢 Cliente registrado: {nombre} - {tel}")
         return True, 'Registro exitoso'
     except Exception as e:
         print(f"🔴 Error al registrar cliente: {e}")
         return False, f'Error al registrar: {str(e)}'
 
-# === FUNCIÓN DE INICIO DE SESIÓN MEJORADA ===
 def iniciar_sesion(tel, cedula):
     try:
-        cliente = DB.iniciar_sesion(tel, cedula)
+        cliente = BDC.iniciar_sesion(tel, cedula)
         if cliente:
-            # Obtener información completa del cliente
-            cliente_completo = DB.buscar_cliente(tel)
+            cliente_completo = BDC.buscar_cliente(tel)
             if cliente_completo:
                 print(f"🟢 Inicio de sesión exitoso para: {tel}")
                 return True, "¡Inicio de sesión exitoso! 🎉", cliente_completo
@@ -96,11 +165,15 @@ def iniciar_sesion(tel, cedula):
         print(f"🔴 Error en inicio de sesión: {e}")
         return False, "❌ Error del sistema. Intenta más tarde.", None
 
-# === ENVIAR MENSAJE DE TEXTO MEJORADO ===
+# === FUNCIONES PARA MENÚS INTERACTIVOS ===
 def enviar_mensaje(numero, texto):
+    """Envía mensaje de texto simple"""
     try:
         url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
-        headers = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {TOKEN}", 
+            "Content-Type": "application/json"
+        }
         data = {
             "messaging_product": "whatsapp",
             "to": numero,
@@ -109,161 +182,319 @@ def enviar_mensaje(numero, texto):
         }
         response = requests.post(url, headers=headers, json=data, timeout=10)
         if response.status_code == 200:
-            print(f"→ Enviado a {numero}: {texto}")
+            print(f"→ Mensaje enviado a {numero}")
             return True
         else:
             print(f"🔴 Error API WhatsApp: {response.status_code} - {response.text}")
             return False
-    except requests.exceptions.RequestException as e:
-        print(f"🔴 Error de conexión enviando mensaje: {e}")
-        return False
     except Exception as e:
-        print(f"🔴 Error inesperado enviando mensaje: {e}")
+        print(f"🔴 Error enviando mensaje: {e}")
         return False
 
-# === ENVIAR MENÚ PRINCIPAL ===
-def enviar_menu(numero):
+def enviar_menu_interactivo(numero, titulo_boton, texto_cuerpo, secciones):
+    """Envía un menú interactivo con lista de opciones"""
     try:
         url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
-        headers = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
         data = {
             "messaging_product": "whatsapp",
+            "recipient_type": "individual",
             "to": numero,
             "type": "interactive",
             "interactive": {
                 "type": "list",
-                "header": {"type": "text", "text": "👋 ¡Hola! Bienvenid@ a Mezón Peruano, el auténtico sabor peruano 🇵🇪 "},
-                "body": {"text": "Por favor selecciona una opción del menú:"},
-                "footer": {"text": "ChatBot - Sistema de Autenticación"},
+                "header": {
+                    "type": "text",
+                    "text": "🇵🇪 Mezón Peruano"
+                },
+                "body": {
+                    "text": texto_cuerpo
+                },
+                "footer": {
+                    "text": "Selecciona una opción del menú"
+                },
                 "action": {
-                    "button": "Ver opciones",
-                    "sections": [
-                        {
-                            "title": "Menú principal",
-                            "rows": [
-                                {"id": "1", "title": "🔐 Iniciar sesión", "description": "Accede a tu cuenta existente"},
-                                {"id": "2", "title": "📝 Registrarse", "description": "Crea una nueva cuenta"},
-                                {"id": "3", "title": "🍛 Ver menú completo", "description": "Explora nuestros platos típicos y encuentra tu favorito."},
-                                {"id": "4", "title": "💸 Ver promociones del día", "description": "¡No te pierdas nuestras ofertas especiales!"},
-                                {"id": "5", "title": "🕓 Horarios de atención", "description": "Consulta cuándo estamos disponibles para atenderte."},
-                                {"id": "6", "title": "📍 Ver dirección o contacto", "description": "Encuentra nuestra ubicación y medios de contacto."},
-                                {"id": "7", "title": "🧑‍💼 Hablar con un experto", "description": "¿Tienes dudas? Nuestro equipo está listo para ayudarte por chat."}
-                            ]
-                        }
-                    ]
+                    "button": titulo_boton,
+                    "sections": secciones
                 }
             }
         }
+        
         response = requests.post(url, headers=headers, json=data, timeout=10)
+        
         if response.status_code == 200:
-            print(f"→ Menú enviado a {numero}")
+            print(f"→ Menú interactivo enviado a {numero}")
             return True
         else:
-            print(f"🔴 Error enviando menú: {response.status_code}")
+            print(f"🔴 Error enviando menú: {response.status_code} - {response.text}")
             return False
-    except Exception as e:
-        print(f"🔴 Error enviando menú: {e}")
-        return False
-
-# === ENVIAR MENÚ DE USUARIO LOGUEADO ===
-def enviar_menu_logueado(numero, nombre_usuario=None):
-    try:
-        url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
-        headers = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
-        
-        saludo = f"👋 Hola {nombre_usuario}" if nombre_usuario else "👋 Hola"
-        
-        data = {
-            "messaging_product": "whatsapp",
-            "to": numero,
-            "type": "interactive",
-            "interactive": {
-                "type": "list",
-                "header": {"type": "text", "text": "🎉 ¡Sesión Activa!"},
-                "body": {"text": f"{saludo}\n\nSelecciona una opción:"},
-                "footer": {"text": "Sesión iniciada - ChatBot"},
-                "action": {
-                    "button": "Opciones",
-                    "sections": [
-                        {
-                            "title": "Menú de Usuario",
-                            "rows": [
-                                {"id": "cerrar_sesion", "title": "🚪 Cerrar sesión", "description": "Salir de tu cuenta"},
-                                {"id": "actualizar_datos", "title": "✏️ Actualizar datos", "description": "Modificar tu información"},
-                                {"id": "menu_principal", "title": "🏠 Menú principal", "description": "Volver al menú inicial"},
-                                {"id": "informacion", "title": "ℹ️ Mi información", "description": "Ver tus datos personales"}
-                            ]
-                        }
-                    ]
-                }
-            }
-        }
-        response = requests.post(url, headers=headers, json=data, timeout=10)
-        if response.status_code == 200:
-            print(f"→ Menú logueado enviado a {numero}")
-            return True
-        else:
-            print(f"🔴 Error enviando menú logueado: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"🔴 Error enviando menú logueado: {e}")
-        return False
-
-# === ENVIAR MENSAJE DE BIENVENIDA AL LOGUEARSE ===
-def enviar_bienvenida_logueado(numero, nombre_usuario=None):
-    mensaje = "🎉 *¡Bienvenido de nuevo!*\n\n"
-    if nombre_usuario:
-        mensaje += f"👋 Hola *{nombre_usuario}*\n\n"
-    
-    mensaje += "✅ *Sesión iniciada correctamente*\n\n"
-    mensaje += "Ahora puedes acceder a funciones exclusivas:\n"
-    mensaje += "• 📋 Ver y actualizar tu perfil\n"
-    mensaje += "• 🍽️ Hacer pedidos (próximamente)\n"
-    mensaje += "• 📊 Ver historial (próximamente)\n"
-    mensaje += "• ⚙️ Gestionar tu cuenta\n\n"
-    mensaje += "Usa el menú interactivo para navegar."
-    
-    enviar_mensaje(numero, mensaje)
-    # Enviar menú de usuario logueado después del mensaje de bienvenida
-    enviar_menu_logueado(numero, nombre_usuario)
-
-# === ACTUALIZAR DATOS DEL USUARIO ===
-def actualizar_datos_usuario(telefono, nuevos_datos):
-    try:
-        if telefono not in SESIONES_ACTIVAS:
-            return False, "❌ No hay sesión activa."
-        
-        sesion = SESIONES_ACTIVAS[telefono]
-        id_usuario = sesion["id_usuario"]
-        cedula = sesion["cedula"]
-        
-        # Actualizar en la base de datos
-        success = DB.actualizar_cliente(id_usuario, cedula, nuevos_datos)
-        
-        if success:
-            # Actualizar sesión local si el nombre fue modificado
-            if "nombre" in nuevos_datos:
-                SESIONES_ACTIVAS[telefono]["nombre"] = nuevos_datos["nombre"]
-            return True, "✅ Datos actualizados correctamente."
-        else:
-            return False, "❌ Error al actualizar los datos."
             
     except Exception as e:
-        print(f"🔴 Error actualizando datos: {e}")
-        return False, "❌ Error del sistema al actualizar."
+        print(f"🔴 Error en enviar_menu_interactivo: {e}")
+        return False
 
-# === WEBHOOK PRINCIPAL CORREGIDO ===
+def enviar_menu_principal(numero):
+    """Menú principal con opciones de login, registro, menú e información"""
+    if numero in SESIONES_ACTIVAS:
+        nombre = SESIONES_ACTIVAS[numero].get("nombre")
+        enviar_menu_logueado(numero, nombre)
+        return True
+    
+    secciones = [
+        {
+            "title": "🔐 Acceso",
+            "rows": [
+                {
+                    "id": "iniciar_sesion",
+                    "title": "Iniciar Sesión",
+                    "description": "Accede con tu cuenta"
+                },
+                {
+                    "id": "registrarse",
+                    "title": "Registrarse",
+                    "description": "Crea una nueva cuenta"
+                }
+            ]
+        },
+        {
+            "title": "📱 Servicios",
+            "rows": [
+                {
+                    "id": "ver_menu",
+                    "title": "Ver Menú",
+                    "description": "Consulta nuestros productos"
+                },
+                {
+                    "id": "informacion",
+                    "title": "Información",
+                    "description": "Sobre nosotros"
+                }
+            ]
+        }
+    ]
+    
+    return enviar_menu_interactivo(
+        numero,
+        "📋 Ver Opciones",
+        "👋 ¡Bienvenid@ a Mezón Peruano!\n\nSelecciona una opción para continuar:",
+        secciones
+    )
+
+def enviar_menu_logueado(numero, nombre_usuario=None):
+    """Menú para usuarios con sesión activa"""
+    saludo = f"👋 Hola {nombre_usuario}" if nombre_usuario else "👋 Hola"
+    
+    secciones = [
+        {
+            "title": "🍽️ Servicios",
+            "rows": [
+                {
+                    "id": "ver_menu",
+                    "title": "Ver Menú",
+                    "description": "Consulta nuestros productos"
+                },
+                {
+                    "id": "informacion",
+                    "title": "Información",
+                    "description": "Sobre nosotros"
+                }
+            ]
+        },
+        {
+            "title": "👤 Mi Cuenta",
+            "rows": [
+                {
+                    "id": "mi_informacion",
+                    "title": "Mi Información",
+                    "description": "Ver mis datos personales"
+                },
+                {
+                    "id": "actualizar_datos",
+                    "title": "Actualizar Datos",
+                    "description": "Modificar mi información"
+                },
+                {
+                    "id": "cerrar_sesion",
+                    "title": "Cerrar Sesión",
+                    "description": "Salir de mi cuenta"
+                }
+            ]
+        }
+    ]
+    
+    return enviar_menu_interactivo(
+        numero,
+        "⚙️ Opciones",
+        f"{saludo} - *Sesión Activa* 🎉\n\n¿Qué deseas hacer?",
+        secciones
+    )
+
+def enviar_menu_actualizacion(numero):
+    """Menú para seleccionar qué dato actualizar"""
+    secciones = [
+        {
+            "title": "¿Qué deseas actualizar?",
+            "rows": [
+                {
+                    "id": "actualizar_nombre",
+                    "title": "Actualizar Nombre",
+                    "description": "Cambiar tu nombre completo"
+                },
+                {
+                    "id": "actualizar_direccion",
+                    "title": "Actualizar Dirección",
+                    "description": "Cambiar tu dirección"
+                },
+                {
+                    "id": "actualizar_cedula",
+                    "title": "Actualizar Cédula",
+                    "description": "Cambiar tu número de cédula"
+                }
+            ]
+        },
+        {
+            "title": "🔙 Navegación",
+            "rows": [
+                {
+                    "id": "cancelar_actualizacion",
+                    "title": "Cancelar",
+                    "description": "Volver al menú anterior"
+                }
+            ]
+        }
+    ]
+    
+    return enviar_menu_interactivo(
+        numero,
+        "✏️ Seleccionar Campo",
+        "📝 *Actualizar Datos Personales*\n\nSelecciona el campo que deseas modificar:",
+        secciones
+    )
+
+def enviar_menu_productos(numero):
+    """Menú de productos disponibles desde la base de datos"""
+    try:
+        productos = DBP.listar_productos()
+        
+        if not productos:
+            enviar_mensaje(numero, "📭 No hay productos disponibles en este momento.")
+            enviar_menu_principal(numero)
+            return False
+        
+        categorias = {}
+        for producto in productos:
+            if producto.get("Disponible", 1) == 1:
+                categoria = producto.get("categoria", "Otros")
+                if categoria not in categorias:
+                    categorias[categoria] = []
+                
+                descripcion = f"${producto.get('precio', 0):,}"
+                if len(descripcion) > 70:
+                    descripcion = descripcion[:67] + "..."
+                
+                categorias[categoria].append({
+                    "id": f"producto_{producto.get('id', '')}",
+                    "title": producto.get("nombre", "Producto"),
+                    "description": descripcion
+                })
+        
+        secciones = []
+        
+        for categoria, productos_cat in categorias.items():
+            if productos_cat:
+                secciones.append({
+                    "title": f"🍽️ {categoria}",
+                    "rows": productos_cat
+                })
+        
+        secciones.append({
+            "title": "🔙 Navegación",
+            "rows": [
+                {
+                    "id": "volver_menu",
+                    "title": "Volver al Menú",
+                    "description": "Regresar al menú principal"
+                }
+            ]
+        })
+        
+        return enviar_menu_interactivo(
+            numero,
+            "🍽️ Ver Productos",
+            "📋 *Menú Disponible - Mezón Peruano* 🇵🇪\n\nSelecciona un producto para más información:",
+            secciones
+        )
+        
+    except Exception as e:
+        print(f"🔴 Error obteniendo productos: {e}")
+        enviar_mensaje(numero, "❌ Error al cargar el menú. Intenta más tarde.")
+        enviar_menu_principal(numero)
+        return False
+
+def enviar_detalle_producto(numero, producto_id):
+    """Envía los detalles de un producto específico"""
+    try:
+        if producto_id.startswith("producto_"):
+            id_num = producto_id.replace("producto_", "")
+            try:
+                id_num = int(id_num)
+            except ValueError:
+                enviar_mensaje(numero, "❌ Producto no encontrado.")
+                enviar_menu_productos(numero)
+                return
+        
+        producto = DBP.buscar_producto_por_id(id_num)
+        
+        if not producto:
+            enviar_mensaje(numero, "❌ Producto no encontrado.")
+            enviar_menu_productos(numero)
+            return
+        
+        mensaje = f"🍽️ *{producto.get('nombre', 'Producto')}*\n\n"
+        mensaje += f"📝 *Descripción:* {producto.get('descripcion', 'Sin descripción')}\n"
+        mensaje += f"💰 *Precio:* ${producto.get('precio', 0):,}\n"
+        mensaje += f"📂 *Categoría:* {producto.get('categoria', 'General')}\n"
+        
+        disponibilidad = producto.get("Disponible", 1)
+        if disponibilidad == 1:
+            mensaje += "✅ *Disponible*\n\n"
+        else:
+            mensaje += "❌ *No disponible*\n\n"
+        
+        mensaje += "¡Próximamente podrás hacer pedidos! 🚀"
+        
+        enviar_mensaje(numero, mensaje)
+        
+        time.sleep(1)
+        enviar_menu_productos(numero)
+        
+    except Exception as e:
+        print(f"🔴 Error mostrando detalle producto: {e}")
+        enviar_mensaje(numero, "❌ Error al cargar información del producto.")
+        enviar_menu_productos(numero)
+
+# === WEBHOOK PRINCIPAL ===
 @app.route("/webhook/", methods=["POST", "GET"])
 def webhook_whatsapp():
     if request.method == "GET":
-        if request.args.get('hub.verify_token') == "HolaNovato":
-            return request.args.get('hub.challenge')
-        return "Token inválido"
+        verify_token = request.args.get('hub.verify_token')
+        challenge = request.args.get('hub.challenge')
+        
+        print(f"🔍 Verificación webhook - Token recibido: {verify_token}")
+        
+        if verify_token == "HolaNovato":
+            print("✅ Token de verificación correcto")
+            return challenge
+        else:
+            print(f"❌ Token incorrecto. Esperado: 'HolaNovato', Recibido: '{verify_token}'")
+            return "Token inválido", 403
 
     try:
         data = request.get_json()
-
-        # Extraer datos del mensaje
         try:
             telefono = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
             mensaje = ""
@@ -274,39 +505,328 @@ def webhook_whatsapp():
                 mensaje = sanitizar_texto(mensaje)
             elif tipo == "interactive":
                 mensaje = data['entry'][0]['changes'][0]['value']['messages'][0]['interactive']['list_reply']['id']
+                print(f"🎯 Opción interactiva seleccionada: {mensaje}")
+                
         except KeyError:
             return jsonify({"status": "no message"}), 200
 
         print(f"📱 Mensaje de {telefono}: {mensaje}")
 
+        # === VERIFICACIÓN DE HORARIO DE ATENCIÓN ===
+        if not esta_en_horario_servicio():
+            print("⏰ Mensaje recibido fuera del horario de atención")
+            enviar_mensaje_fuera_horario(telefono)
+            return jsonify({"status": "fuera de horario"}), 200
+        
+        # === PRIMERO: Manejo de etapas activas (actualización, registro, login) ===
+        if telefono in USUARIOS:
+            etapa = USUARIOS[telefono].get("etapa")
+            print(f"🔍 Usuario {telefono} en etapa: {etapa}")
+            
+            # === PROCESO DE ACTUALIZACIÓN DE DATOS ===
+            if etapa == "actualizando_nombre":
+                print("🔧 Procesando actualización de nombre...")
+                if len(mensaje) < 2:
+                    enviar_mensaje(telefono, "❌ El nombre debe tener al menos 2 caracteres.\n\nIngresa un nombre válido:")
+                    return jsonify({"status": "invalid name"}), 200
+    
+                try:
+                    # Obtener cédula del usuario para verificación
+                    cedula_actual = SESIONES_ACTIVAS[telefono].get("cedula")
+                    print(f"🔑 Verificando con cédula: {cedula_actual}")
+        
+                    # Actualizar en base de datos
+                    print(f"🔄 Actualizando nombre a: {mensaje.title()}")
+                    success = BDC.actualizar_nombre_cliente(str(telefono), mensaje.title(), str(cedula_actual))
+        
+                    if success:
+                        SESIONES_ACTIVAS[telefono]["nombre"] = mensaje.title()
+                        enviar_mensaje(telefono, f"✅ *Nombre actualizado correctamente*\n\nNuevo nombre: {mensaje.title()}")
+                        del USUARIOS[telefono]
+                        enviar_menu_logueado(telefono, mensaje.title())
+                    else:
+                        enviar_mensaje(telefono, "❌ Error al actualizar. Verifica tus datos.")
+                        del USUARIOS[telefono]
+                        nombre_anterior = SESIONES_ACTIVAS[telefono].get("nombre")
+                        enviar_menu_logueado(telefono, nombre_anterior)
+            
+                except Exception as e:
+                    print(f"🔴 Error actualizando nombre: {e}")
+                    enviar_mensaje(telefono, "❌ Error al actualizar. Intenta nuevamente.")
+                    del USUARIOS[telefono]
+                
+                return jsonify({"status": "nombre actualizado"}), 200
+            
+            elif etapa == "actualizando_direccion":
+                print("🔧 Procesando actualización de dirección...")
+                if len(mensaje) < 5:
+                    enviar_mensaje(telefono, "❌ La dirección debe tener al menos 5 caracteres.\n\nIngresa una dirección válida:")
+                    return jsonify({"status": "invalid address"}), 200
+    
+                try:
+                    # Obtener cédula del usuario para verificación
+                    cedula_actual = SESIONES_ACTIVAS[telefono].get("cedula")
+                    print(f"🔑 Verificando con cédula: {cedula_actual}")
+        
+                    # Actualizar en base de datos
+                    print(f"🔄 Actualizando dirección a: {mensaje}")
+                    success = BDC.actualizar_direccion_cliente(telefono, mensaje, cedula_actual)
+        
+                    if success:
+                        enviar_mensaje(telefono, f"✅ *Dirección actualizada correctamente*\n\nNueva dirección: {mensaje}")
+                        del USUARIOS[telefono]
+                        nombre = SESIONES_ACTIVAS[telefono].get("nombre")
+                        enviar_menu_logueado(telefono, nombre)
+                    else:
+                        enviar_mensaje(telefono, "❌ Error al actualizar. Verifica tus datos.")
+                        del USUARIOS[telefono]
+                        nombre = SESIONES_ACTIVAS[telefono].get("nombre")
+                        enviar_menu_logueado(telefono, nombre)
+            
+                except Exception as e:
+                    print(f"🔴 Error actualizando dirección: {e}")
+                    enviar_mensaje(telefono, "❌ Error al actualizar. Intenta nuevamente.")
+                    del USUARIOS[telefono]
+    
+                return jsonify({"status": "direccion actualizada"}), 200
+            
+            elif etapa == "verificando_cedula_actual":
+                print("🔧 Procesando verificación de cédula actual...")
+                if not validar_cedula(mensaje):
+                    enviar_mensaje(telefono, "❌ Cédula inválida. Debe tener entre 6 y 10 dígitos.\n\nIngresa tu cédula actual:")
+                    return jsonify({"status": "invalid cedula"}), 200
+    
+                # Verificar que la cédula ingresada coincida con la almacenada
+                try:
+                    print(f"🔑 Verificando cédula: {mensaje}")
+                    cedula_coincide = BDC.verificar_cedula_cliente(telefono, mensaje)
+        
+                    if cedula_coincide:
+                        enviar_mensaje(telefono, "✅ *Verificación exitosa*\n\nAhora ingresa tu nueva cédula (6-10 dígitos):")
+                        USUARIOS[telefono] = {"etapa": "actualizando_cedula"}
+                    else:
+                        enviar_mensaje(telefono, "❌ *Cédula incorrecta*\n\nLa cédula ingresada no coincide con tu cédula registrada.\n\nActualización cancelada por seguridad.")
+                        del USUARIOS[telefono]
+                        nombre = SESIONES_ACTIVAS[telefono].get("nombre")
+                        enviar_menu_logueado(telefono, nombre)
+        
+                except Exception as e:
+                    print(f"🔴 Error verificando cédula: {e}")
+                    enviar_mensaje(telefono, "❌ Error en verificación. Intenta más tarde.")
+                    del USUARIOS[telefono]
+    
+                return jsonify({"status": "cedula verificada"}), 200
+            
+            elif etapa == "actualizando_cedula":
+                print("🔧 Procesando actualización de cédula...")
+                if not validar_cedula(mensaje):
+                    enviar_mensaje(telefono, "❌ Cédula inválida. Debe tener entre 6 y 10 dígitos.\n\nIngresa una cédula válida:")
+                    return jsonify({"status": "invalid cedula"}), 200
+    
+                try:
+                    # Obtener cédula actual del usuario para verificación
+                    cedula_actual = SESIONES_ACTIVAS[telefono].get("cedula")
+                    print(f"🔑 Verificando con cédula actual: {cedula_actual}")
+        
+                    # Actualizar en base de datos
+                    print(f"🔄 Actualizando cédula a: {mensaje}")
+                    success = BDC.actualizar_cedula_cliente(str(telefono), mensaje, str(cedula_actual))
+        
+                    if success:
+                        SESIONES_ACTIVAS[telefono]["cedula"] = mensaje
+                        enviar_mensaje(telefono, f"✅ *Cédula actualizada correctamente*\n\nTu información ha sido actualizada de forma segura.")
+                        del USUARIOS[telefono]
+                        nombre = SESIONES_ACTIVAS[telefono].get("nombre")
+                        enviar_menu_logueado(telefono, nombre)
+                    else:
+                        enviar_mensaje(telefono, "❌ Error al actualizar. Verifica tus datos.")
+                        del USUARIOS[telefono]
+                        nombre = SESIONES_ACTIVAS[telefono].get("nombre")
+                        enviar_menu_logueado(telefono, nombre)
+            
+                except Exception as e:
+                    print(f"🔴 Error actualizando cédula: {e}")
+                    enviar_mensaje(telefono, "❌ Error al actualizar. Intenta nuevamente.")
+                    del USUARIOS[telefono]
+    
+                return jsonify({"status": "cedula actualizada"}), 200
+            
+            # === PROCESO DE INICIO DE SESIÓN ===
+            elif etapa == "iniciando_sesion":
+                print("🔧 Procesando inicio de sesión...")
+                if not validar_cedula(mensaje):
+                    enviar_mensaje(telefono, "❌ Cédula inválida. Debe tener entre 6 y 10 dígitos.\n\nPor favor, ingresa tu cédula nuevamente:")
+                    return jsonify({"status": "invalid cedula"}), 200
+                
+                success, mensaje_respuesta, cliente = iniciar_sesion(telefono, mensaje)
+                
+                if success and cliente:
+                    SESIONES_ACTIVAS[telefono] = {
+                        "id_usuario": cliente["id"],
+                        "cedula": mensaje,
+                        "nombre": cliente["nombre"]
+                    }
+                    enviar_mensaje(telefono, f"🎉 *¡Bienvenido de nuevo, {cliente['nombre']}!*\n\n✅ Sesión iniciada correctamente.")
+                    enviar_menu_logueado(telefono, cliente["nombre"])
+                    limpiar_estado_usuario(telefono)
+                else:
+                    if telefono not in LOGIN_ATTEMPTS:
+                        LOGIN_ATTEMPTS[telefono] = 0
+                    LOGIN_ATTEMPTS[telefono] += 1
+                    
+                    if LOGIN_ATTEMPTS[telefono] >= 3:
+                        enviar_mensaje(telefono, "🔒 Demasiados intentos fallidos. Intenta más tarde.")
+                        limpiar_estado_usuario(telefono)
+                        enviar_menu_principal(telefono)
+                    else:
+                        enviar_mensaje(telefono, f"{mensaje_respuesta}\n\nIntento {LOGIN_ATTEMPTS[telefono]}/3\n\nIngresa tu cédula:")
+                
+                return jsonify({"status": "login processed"}), 200
 
-        # === MANEJO DE USUARIOS LOGUEADOS ===
+            # === PROCESO DE REGISTRO ===
+            elif etapa == "pidiendo_nombre":
+                print("🔧 Procesando registro - nombre...")
+                if len(mensaje) < 2:
+                    enviar_mensaje(telefono, "❌ El nombre debe tener al menos 2 caracteres.\n\nIngresa tu nombre completo:")
+                    return jsonify({"status": "invalid name"}), 200
+                
+                USUARIOS[telefono]["nombre"] = mensaje.title()
+                USUARIOS[telefono]["etapa"] = "pidiendo_direccion"
+                enviar_mensaje(telefono, "📍 Perfecto! Ahora ingresa tu *dirección completa*:")
+                return jsonify({"status": "ask direccion"}), 200
+
+            elif etapa == "pidiendo_direccion":
+                print("🔧 Procesando registro - dirección...")
+                if len(mensaje) < 5:
+                    enviar_mensaje(telefono, "❌ La dirección debe tener al menos 5 caracteres.\n\nIngresa una dirección válida:")
+                    return jsonify({"status": "invalid address"}), 200
+                
+                USUARIOS[telefono]["direccion"] = mensaje
+                USUARIOS[telefono]["etapa"] = "pidiendo_cedula"
+                enviar_mensaje(telefono, "🆔 Excelente! Por último, ingresa tu *número de cédula* (6-10 dígitos):")
+                return jsonify({"status": "ask cedula"}), 200
+
+            elif etapa == "pidiendo_cedula":
+                print("🔧 Procesando registro - cédula...")
+                if not validar_cedula(mensaje):
+                    enviar_mensaje(telefono, "❌ Cédula inválida. Debe tener entre 6 y 10 dígitos.\n\nIngresa tu cédula:")
+                    return jsonify({"status": "invalid cedula"}), 200
+                
+                nombre = USUARIOS[telefono]["nombre"]
+                direccion = USUARIOS[telefono]["direccion"]
+                cedula = mensaje
+                
+                success, mensaje_respuesta = agregar_cliente(nombre, telefono, direccion, cedula)
+                
+                if success:
+                    mensaje_exito = f"""✅ *¡Registro completado exitosamente!*
+
+📋 *Tus datos registrados:*
+👤 Nombre: {nombre}
+📞 Teléfono: {telefono}
+🏠 Dirección: {direccion}
+🆔 Cédula: {cedula}
+
+¡Bienvenido a Mezón Peruano! 🇵🇪"""
+                    enviar_mensaje(telefono, mensaje_exito)
+                    del USUARIOS[telefono]
+                    enviar_menu_principal(telefono)
+                else:
+                    if "ya está registrado" in mensaje_respuesta:
+                        enviar_mensaje(telefono, f"❌ *Usuario ya registrado*\n\nEl número {telefono} ya tiene una cuenta.\n\nPor favor selecciona 'Iniciar Sesión' desde el menú.")
+                        del USUARIOS[telefono]
+                        enviar_menu_principal(telefono)
+                    else:
+                        enviar_mensaje(telefono, f"❌ {mensaje_respuesta}")
+                        del USUARIOS[telefono]
+                
+                return jsonify({"status": "registro completo"}), 200
+
+        # === SEGUNDO: Manejo de usuarios logueados ===
         if telefono in SESIONES_ACTIVAS:
-            if mensaje in ["cerrar_sesion", "5"]:
+            print(f"🔐 Usuario {telefono} tiene sesión activa")
+            
+            if mensaje == "cerrar_sesion":
                 nombre_usuario = SESIONES_ACTIVAS[telefono].get("nombre", "Usuario")
                 del SESIONES_ACTIVAS[telefono]
                 enviar_mensaje(telefono, f"👋 *Hasta pronto, {nombre_usuario}!*\n\nTu sesión ha sido cerrada correctamente.")
-                enviar_menu(telefono)
+                enviar_menu_principal(telefono)
                 return jsonify({"status": "sesion cerrada"}), 200
 
-            elif mensaje in ["actualizar_datos", "6"]:
-                enviar_mensaje(telefono, "✏️ *Actualizar Datos*\n\nPor favor ingresa los nuevos datos en el formato:\n\n*Nombre:Nuevo nombre\nDirección:Nueva dirección*\n\nEjemplo:\nNombre:Juan Pérez\nDirección:Calle 123 #45-67")
-                USUARIOS[telefono] = {"etapa": "actualizando_datos"}
-                return jsonify({"status": "actualizando datos"}), 200
+            elif mensaje == "actualizar_datos":
+                print("🔄 Usuario seleccionó actualizar datos")
+                enviar_menu_actualizacion(telefono)
+                return jsonify({"status": "menu actualizacion"}), 200
+            
+            # LAS OPCIONES DE ACTUALIZACIÓN ESPECÍFICAS DEBEN ESTAR AQUÍ
+            elif mensaje == "actualizar_nombre":
+                print("📝 Iniciando actualización de nombre")
+                enviar_mensaje(telefono, "✏️ *Actualizar Nombre*\n\nIngresa tu nuevo nombre completo:")
+                USUARIOS[telefono] = {"etapa": "actualizando_nombre"}  # ✅ AHORA SÍ SE GUARDA
+                print(f"✅ Usuario {telefono} en etapa: actualizando_nombre")
+                return jsonify({"status": "actualizando nombre"}), 200
+            
+            elif mensaje == "actualizar_direccion":
+                print("📝 Iniciando actualización de dirección")
+                enviar_mensaje(telefono, "✏️ *Actualizar Dirección*\n\nIngresa tu nueva dirección completa:")
+                USUARIOS[telefono] = {"etapa": "actualizando_direccion"}
+                print(f"✅ Usuario {telefono} en etapa: actualizando_direccion")
+                return jsonify({"status": "actualizando direccion"}), 200
+            
+            elif mensaje == "actualizar_cedula":
+                print("📝 Iniciando actualización de cédula")
+                enviar_mensaje(telefono, "🔐 *Verificación de Seguridad*\n\nPor tu seguridad, primero debes confirmar tu cédula actual.\n\nIngresa tu cédula actual (6-10 dígitos):")
+                USUARIOS[telefono] = {"etapa": "verificando_cedula_actual"}
+                print(f"✅ Usuario {telefono} en etapa: verificando_cedula_actual")
+                return jsonify({"status": "verificando cedula"}), 200
+            
+            elif mensaje == "cancelar_actualizacion":
+                nombre = SESIONES_ACTIVAS[telefono].get("nombre")
+                enviar_mensaje(telefono, "❌ Actualización cancelada.")
+                enviar_menu_logueado(telefono, nombre)
+                return jsonify({"status": "actualizacion cancelada"}), 200
 
-            elif mensaje in ["menu_principal", "7"]:
-                enviar_menu(telefono)
+            elif mensaje == "menu_principal":
+                enviar_menu_principal(telefono)
                 return jsonify({"status": "menu principal"}), 200
+            
+            elif mensaje == "ver_menu":
+                enviar_menu_productos(telefono)
+                return jsonify({"status": "ver menu"}), 200
+            
+            elif mensaje == "informacion":
+                info_texto = """ℹ️ *Información - Mezón Peruano* 🇵🇪
 
-            elif mensaje in ["informacion", "8"]:
+🍽️ Auténtico sabor peruano en cada plato
+
+📍 *Dirección:* Calle Principal #123
+📞 *Teléfono:* +1-234-567-8900
+🕒 *Horario:* 9:00 AM - 10:00 PM
+📅 *Abierto:* Lunes a Domingo
+
+¡Te esperamos! 🎉"""
+                enviar_mensaje(telefono, info_texto)
+                nombre = SESIONES_ACTIVAS[telefono].get("nombre")
+                enviar_menu_logueado(telefono, nombre)
+                return jsonify({"status": "info"}), 200
+
+            elif mensaje == "mi_informacion":
+                try:
+                    cliente = BDC.buscar_cliente(telefono)
+                    if cliente:
+                        info_msg = f"📋 *Tu Información Completa*\n\n"
+                        info_msg += f"👤 *Nombre:* {cliente.get('nombre', 'No disponible')}\n"
+                        info_msg += f"📞 *Teléfono:* {telefono}\n"
+                        info_msg += f"🏠 *Dirección:* {cliente.get('direccion', 'No disponible')}\n"
+                        enviar_mensaje(telefono, info_msg)
+                    else:
+                        enviar_mensaje(telefono, "❌ No se pudo obtener tu información.")
+                except Exception as e:
+                    print(f"🔴 Error obteniendo información: {e}")
+                    enviar_mensaje(telefono, "❌ Error al consultar información.")
+                
                 sesion = SESIONES_ACTIVAS[telefono]
-                info_msg = f"📋 *Tu Información*\n\n"
-                info_msg += f"👤 *Nombre:* {sesion.get('nombre', 'No disponible')}\n"
-                info_msg += f"📞 *Teléfono:* {telefono}\n"
-                info_msg += f"🆔 *ID de usuario:* {sesion.get('id_usuario', 'No disponible')}\n"
-                info_msg += f"📝 *Cédula:* {sesion.get('cedula', 'No disponible')}\n\n"
-                info_msg += "Para actualizar tus datos, selecciona 'Actualizar datos' en el menú."
-                enviar_mensaje(telefono, info_msg)
+                enviar_menu_logueado(telefono, sesion.get('nombre'))
                 return jsonify({"status": "informacion mostrada"}), 200
 
             else:
@@ -315,209 +835,74 @@ def webhook_whatsapp():
                 enviar_menu_logueado(telefono, nombre)
                 return jsonify({"status": "menu logueado"}), 200
 
-        # === MANEJO DE ACTUALIZACIÓN DE DATOS ===
-        if telefono in USUARIOS and USUARIOS[telefono]["etapa"] == "actualizando_datos":
-            # Procesar actualización de datos
-            lineas = mensaje.split('\n')
-            nuevos_datos = {}
-            
-            for linea in lineas:
-                if ':' in linea:
-                    clave, valor = linea.split(':', 1)
-                    clave = clave.strip().lower()
-                    valor = valor.strip()
-                    
-                    if clave == "nombre" and len(valor) >= 2:
-                        nuevos_datos["nombre"] = valor.title()
-                    elif clave in ["dirección", "direccion"]:
-                        if len(valor) >= 7:
-                            nuevos_datos["direccion"] = valor
-                        else:
-                            enviar_mensaje(telefono, "❌ La dirección debe tener al menos 7 caracteres.")
-                            return jsonify({"status": "direccion invalida"}), 200
-            
-            if nuevos_datos:
-                success, mensaje_respuesta = actualizar_datos_usuario(telefono, nuevos_datos)
-                enviar_mensaje(telefono, mensaje_respuesta)
-                
-                if success:
-                    # Actualizar el nombre en la sesión si fue modificado
-                    if "nombre" in nuevos_datos:
-                        SESIONES_ACTIVAS[telefono]["nombre"] = nuevos_datos["nombre"]
-            else:
-                enviar_mensaje(telefono, "❌ No se proporcionaron datos válidos para actualizar.")
-            
-            del USUARIOS[telefono]
-            nombre = SESIONES_ACTIVAS[telefono].get("nombre")
-            enviar_menu_logueado(telefono, nombre)
-            return jsonify({"status": "actualizacion procesada"}), 200
-
-        # === MANEJO DE INICIO DE SESIÓN ===
-        if telefono in USUARIOS and USUARIOS[telefono]["etapa"] == "iniciando_sesion":
-            cedula = mensaje
-            
-            # Validar cédula
-            if not validar_cedula(cedula):
-                enviar_mensaje(telefono, "❌ Formato de cédula inválido. Debe tener 10 dígitos numéricos válidos.")
-                return jsonify({"status": "invalid cedula"}), 200
-            
-            # Intentar inicio de sesión
-            success, mensaje_respuesta, cliente = iniciar_sesion(telefono, cedula)
-            
-            if success and cliente:
-                # Guardar sesión activa con ID y cédula
-                SESIONES_ACTIVAS[telefono] = {
-                    "id_usuario": cliente["id"],
-                    "cedula": cedula,
-                    "nombre": cliente["nombre"]
-                }
-                enviar_bienvenida_logueado(telefono, cliente["nombre"])
-                # Limpiar estado
-                limpiar_estado_usuario(telefono)
-            else:
-                # Contar intentos fallidos
-                if telefono not in LOGIN_ATTEMPTS:
-                    LOGIN_ATTEMPTS[telefono] = 0
-                LOGIN_ATTEMPTS[telefono] += 1
-                
-                if LOGIN_ATTEMPTS[telefono] >= 3:
-                    enviar_mensaje(telefono, "🔒 Demasiados intentos fallidos. Por seguridad, el inicio de sesión ha sido bloqueado temporalmente.")
-                    limpiar_estado_usuario(telefono)
-                    enviar_menu(telefono)
-                else:
-                    enviar_mensaje(telefono, f"{mensaje_respuesta}\n\nIntento {LOGIN_ATTEMPTS[telefono]}/3\n\nPor favor ingresa tu cédula nuevamente:")
-            
-            return jsonify({"status": "login processed"}), 200
-
-        # === ETAPAS DEL REGISTRO ===
-        if telefono in USUARIOS and USUARIOS[telefono]["etapa"] in ["pidiendo_nombre", "pidiendo_direccion", "pidiendo_cedula"]:
-            etapa = USUARIOS[telefono]["etapa"]
-
-            if etapa == "pidiendo_nombre":
-                if len(mensaje) < 2:
-                    enviar_mensaje(telefono, "❌ El nombre debe tener al menos 2 caracteres. Por favor ingresa tu nombre completo:")
-                    return jsonify({"status": "invalid name"}), 200
-                
-                USUARIOS[telefono]["nombre"] = mensaje.title()
-                USUARIOS[telefono]["etapa"] = "pidiendo_direccion"
-                enviar_mensaje(telefono, "📍 Ingresa tu dirección completa:")
-                return jsonify({"status": "ask direccion"}), 200
-
-            elif etapa == "pidiendo_direccion":
-                if len(mensaje) < 5:
-                    enviar_mensaje(telefono, "❌ La dirección parece muy corta. Por favor ingresa una dirección válida:")
-                    return jsonify({"status": "invalid address"}), 200
-                
-                USUARIOS[telefono]["direccion"] = mensaje
-                USUARIOS[telefono]["etapa"] = "pidiendo_cedula"
-                enviar_mensaje(telefono, "🆔 Ingresa tu número de cédula (10 dígitos):")
-                return jsonify({"status": "ask cedula"}), 200
-
-            elif etapa == "pidiendo_cedula":
-                if not validar_cedula(mensaje):
-                    enviar_mensaje(telefono, "❌ Cédula inválida. Debe tener 10 dígitos numéricos válidos. Por favor ingresa tu cédula:")
-                    return jsonify({"status": "invalid cedula"}), 200
-                
-                USUARIOS[telefono]["cedula"] = mensaje
-                nombre = USUARIOS[telefono]["nombre"]
-                direccion = USUARIOS[telefono]["direccion"]
-                cedula = USUARIOS[telefono]["cedula"]
-                tel = telefono
-                
-                success, mensaje_respuesta = agregar_cliente(nombre, tel, direccion, cedula)
-                
-                if success:
-                    mensaje_exito = f"""✅ *¡Registro completado!*
-
-📋 Nombre: {nombre}
-📞 Teléfono: {tel}
-🏠 Dirección: {direccion}
-🆔 Cédula: {cedula}
-
-¡Bienvenido a nuestro sistema! 🎉"""
-                    enviar_mensaje(telefono, mensaje_exito)
-                else:
-                    if "ya está registrado" in mensaje_respuesta:
-                        mensaje_error = f"""❌ *Usuario ya registrado*
-
-📞 El número {tel} ya se encuentra registrado en nuestro sistema.
-
-Si ya tienes una cuenta, puedes:
-• 🔐 Iniciar sesión con tu cédula
-• ✏️ Actualizar tus datos si necesitas modificarlos
-
-Si olvidaste tu cédula, contacta con soporte."""
-                        enviar_mensaje(telefono, mensaje_error)
-                        enviar_menu(telefono)
-                    else:
-                        enviar_mensaje(telefono, f"❌ {mensaje_respuesta}")
-                
-                del USUARIOS[telefono]
-                return jsonify({"status": "registro completo"}), 200
-
-        # === MENSAJE DE BIENVENIDA ===
-        if mensaje in ["hola", "hi", "hello", "menú", "menu", "opciones","buenas"]:
-            enviar_menu(telefono)
-            return jsonify({"status": "menu"}), 200
-
-        # === OPCIONES DEL MENÚ ===
-        if mensaje == "1":  # Iniciar sesión
-            enviar_mensaje(telefono, "🔐 *Inicio de Sesión*\n\nPor favor ingresa tu *número de cédula* para continuar:")
+        # === OPCIONES DEL MENÚ INTERACTIVO (cuando NO está en proceso) ===
+        if mensaje == "iniciar_sesion":
+            enviar_mensaje(telefono, "🔐 *Inicio de Sesión*\n\nPor favor, ingresa tu *número de cédula* (6-10 dígitos):")
             USUARIOS[telefono] = {"etapa": "iniciando_sesion"}
             return jsonify({"status": "login started"}), 200
 
-        elif mensaje == "2":  # Registrarse
-            # VERIFICAR SI EL USUARIO YA ESTÁ REGISTRADO ANTES DE INICIAR EL PROCESO
+        elif mensaje == "registrarse":
             if usuario_ya_registrado(telefono):
-                enviar_mensaje(telefono, f"""❌ *Ya estás registrado*
-
-📞 El número {telefono} ya tiene una cuenta en nuestro sistema.
-
-Por favor selecciona:
-• 🔐 *Iniciar sesión* - Si ya tienes una cuenta
-• ✏️ *Actualizar datos* - Si necesitas modificar tu información (después de iniciar sesión)
-
-Si olvidaste tu cédula, contacta con soporte.""")
-                enviar_menu(telefono)
+                enviar_mensaje(telefono, f"❌ *Ya estás registrado*\n\nEl número {telefono} ya tiene una cuenta.\n\nPor favor selecciona 'Iniciar Sesión' desde el menú.")
+                enviar_menu_principal(telefono)
             else:
-                enviar_mensaje(telefono, "📝 *Registro de Nuevo Usuario*\n\nPor favor escribe tu *nombre completo*:")
+                enviar_mensaje(telefono, "📝 *Registro de Nuevo Usuario*\n\nComencemos con tu registro. Por favor ingresa tu *nombre completo*:")
                 USUARIOS[telefono] = {"etapa": "pidiendo_nombre"}
             return jsonify({"status": "registro inicio"}), 200
 
-        elif mensaje == "3":  # Ver menú
-            enviar_mensaje(telefono, "🍽️ *Nuestro Menú*\n\n🔸 Pizza Margarita - $12\n🔸 Pizza Pepperoni - $14\n🔸 Lasagna - $10\n🔸 Ensalada César - $8\n\nPróximamente podrás hacer pedidos directamente.")
+        elif mensaje == "ver_menu":
+            enviar_menu_productos(telefono)
             return jsonify({"status": "ver menu"}), 200
 
-        elif mensaje == "4":  # Promociones
-            enviar_mensaje(telefono, "💸 *Ver promociones del día*\n\nPróximamente ")
-            return jsonify({"status": "Promos"}), 200
+        elif mensaje == "informacion":
+            info_texto = """ℹ️ *Información - Mezón Peruano* 🇵🇪
+
+🍽️ Auténtico sabor peruano en cada plato
+
+📍 *Dirección:* Calle Principal #123
+📞 *Teléfono:* +1-234-567-8900
+🕒 *Horario:* 9:00 AM - 10:00 PM
+📅 *Abierto:* Lunes a Domingo
+
+¡Te esperamos! 🎉"""
+            enviar_mensaje(telefono, info_texto)
+            enviar_menu_principal(telefono)
+            return jsonify({"status": "info"}), 200
+
+        # === OPCIONES DE PRODUCTOS ===
+        elif mensaje.startswith("producto_"):
+            enviar_detalle_producto(telefono, mensaje)
+            return jsonify({"status": "detalle producto"}), 200
         
-        elif mensaje == "5":  # Horarios de atención
-            enviar_mensaje(telefono, "🕓 *Horarios de atención*\n\nPróximamente ")
-            return jsonify({"status": "horarios"}), 200
-        
-        elif mensaje == "6":  # Dirección o contacto
-            enviar_mensaje(telefono, "📍 *Ver dirección o contacto*\n\nPróximamente ")
-            return jsonify({"status": "docontato"}), 200
-        
-        elif mensaje == "6":  # Hablar con un experto
-            enviar_mensaje(telefono, "🧑‍💼 *Hablar con un experto*\n\nPróximamente ")
-            return jsonify({"status": "hexperto"}), 200
+        elif mensaje == "volver_menu":
+            if telefono in SESIONES_ACTIVAS:
+                nombre = SESIONES_ACTIVAS[telefono].get("nombre")
+                enviar_menu_logueado(telefono, nombre)
+            else:
+                enviar_menu_principal(telefono)
+            return jsonify({"status": "volver menu"}), 200
+
+        # === MENSAJE DE BIENVENIDA ===
+        if mensaje in ["hola", "hi", "hello", "menú", "menu", "opciones", "inicio"]:
+            enviar_menu_principal(telefono)
+            return jsonify({"status": "menu principal"}), 200
 
         # === FALLBACK ===
-        enviar_mensaje(telefono, "🤖 No entendí tu mensaje. Escribe *hola* o *menu* para ver las opciones disponibles.")
+        enviar_menu_principal(telefono)
         return jsonify({"status": "fallback"}), 200
 
     except Exception as e:
         print(f"🔴 Error general en webhook: {e}")
-        # Intentar enviar mensaje de error al usuario
+        import traceback
+        traceback.print_exc()
         try:
-            enviar_mensaje(telefono, "❌ Ocurrió un error inesperado. Por favor intenta nuevamente.")
+            enviar_mensaje(telefono, "❌ Ocurrió un error. Por favor intenta nuevamente escribiendo *hola*.")
         except:
             pass
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# === INICIAR FLASK ===
 if __name__ == "__main__":
-    print("🚀 Iniciando servidor Flask...")
+    print("🚀 Iniciando servidor Flask con menús interactivos...")
+    print("📍 Webhook: /webhook/")
+    print("✨ Menús interactivos habilitados (Select Box)")
     app.run(debug=True, host="0.0.0.0", port=5000)
