@@ -85,8 +85,8 @@ def webhook_redirect():
     return redirect('/webhook/', code=301)
 
 # === CONFIGURACIÓN DE HORARIO ===
-HORARIO_APERTURA = dt_time(9, 0)   # 9:00 AM
-HORARIO_CIERRE = dt_time(22, 0)    # 10:00 PM
+HORARIO_APERTURA = dt_time(11, 0)   # 11:00 AM
+HORARIO_CIERRE = dt_time(21, 0)    # 9:00 PM
 ZONA_HORARIA = pytz.timezone('America/Bogota')
 
 def esta_en_horario_servicio():
@@ -101,7 +101,7 @@ def enviar_mensaje_fuera_horario(numero):
 
 🕒 *Horario de Atención:*
 📅 Lunes a Domingo
-⏰ 9:00 AM - 10:00 PM
+⏰ 11:00 AM - 9:00 PM
 
 Actualmente no estamos en horario de servicio. 
 Nuestro equipo te atenderá tan pronto como volvamos.
@@ -721,13 +721,13 @@ def webhook_whatsapp():
                 if success:
                     mensaje_exito = f"""✅ *¡Registro completado exitosamente!*
 
-📋 *Tus datos registrados:*
-👤 Nombre: {nombre}
-📞 Teléfono: {telefono}
-🏠 Dirección: {direccion}
-🆔 Cédula: {cedula}
+                    📋 *Tus datos registrados:*
+                    👤 Nombre: {nombre}
+                    📞 Teléfono: {telefono}
+                    🏠 Dirección: {direccion}
+                    🆔 Cédula: {cedula}
 
-¡Bienvenido a Mezón Peruano! 🇵🇪"""
+                    ¡Bienvenido a Mezón Peruano! 🇵🇪"""
                     enviar_mensaje(telefono, mensaje_exito)
                     del USUARIOS[telefono]
                     enviar_menu_principal(telefono)
@@ -797,14 +797,15 @@ def webhook_whatsapp():
             elif mensaje == "informacion":
                 info_texto = """ℹ️ *Información - Mezón Peruano* 🇵🇪
 
-🍽️ Auténtico sabor peruano en cada plato
+                🍽️ Auténtico sabor peruano en cada plato
 
-📍 *Dirección:* Calle Principal #123
-📞 *Teléfono:* +1-234-567-8900
-🕒 *Horario:* 9:00 AM - 10:00 PM
-📅 *Abierto:* Lunes a Domingo
+                📍 *Dirección:* Casa Terrarosa - Zipaquirá, Cundinamarca
+                📞 *Teléfono:* +1-234-567-8900
+                🕒 *Horario:* 11:00 AM - 9:00 PM
+                📅 *Abierto:* Lunes a Domingo
 
-¡Te esperamos! 🎉"""
+                ¡Te esperamos! 🎉"""
+
                 enviar_mensaje(telefono, info_texto)
                 nombre = SESIONES_ACTIVAS[telefono].get("nombre")
                 enviar_menu_logueado(telefono, nombre)
@@ -857,14 +858,14 @@ def webhook_whatsapp():
         elif mensaje == "informacion":
             info_texto = """ℹ️ *Información - Mezón Peruano* 🇵🇪
 
-🍽️ Auténtico sabor peruano en cada plato
+                🍽️ Auténtico sabor peruano en cada plato
 
-📍 *Dirección:* Calle Principal #123
-📞 *Teléfono:* +1-234-567-8900
-🕒 *Horario:* 9:00 AM - 10:00 PM
-📅 *Abierto:* Lunes a Domingo
+                📍 *Dirección:* Casa Terrarosa - Zipaquirá, Cundinamarca
+                📞 *Teléfono:* +1-234-567-8900
+                🕒 *Horario:* 11:00 AM - 9:00 PM
+                📅 *Abierto:* Lunes a Domingo
 
-¡Te esperamos! 🎉"""
+                ¡Te esperamos! 🎉"""
             enviar_mensaje(telefono, info_texto)
             enviar_menu_principal(telefono)
             return jsonify({"status": "info"}), 200
