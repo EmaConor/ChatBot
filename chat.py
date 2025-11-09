@@ -12,7 +12,7 @@ import pytz
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
-TOKEN = "EAApdsnrt0rUBPz5pqCZCDjGoz1AnMmmxOshZB5nRKa0FgOH8OXHVsYez4dEjjvnPVyLzddVazQSZCnULKzCf557RqJ9NiOPTrFdgCx4IzL5xaBZBTOggHy3TDlZAzfJ8lEFMClZA2f1ZAa6lSyLT1hzLYtKwNKKLfYlflesKZBEOXDWejxZCAPjgZBL377P25tF6asC5b3YqFAhtwaKTAAil4P1KPuDToIArYd2YIha0cD7EwX1dlYtlkcPZBMLKG6f5dDw5yF4YLebbDuqqnBZC6R1y"
+TOKEN = "EAApdsnrt0rUBPxNdP4SPkJwZCxC8NWqoPkvi0Oooltf8TpQug2b4vcaXBnk1H86gRYgPRIgnQcIRudh8tLdZASHAcEq4WSOFpiU7LPmoZCdMZC742w6vG217OREf7jdhGCK7hmd0kqWUzB02a9DkLSG8fdaOwVOhLfzwVMg7HSq2XTVqLCCpmlG5VBCM3VrKSWTWxjxyKfHNDV2qfCtgAOAxxtZCUs57WDY5vQ8dvjIE2GEN9PEa3I3nBmGBSUknPcVR6AE7TIwsCIZAJjfj1z6cCsbAZDZD"
 PHONE_NUMBER_ID = "863285753529334"
 
 # === BASE DE DATOS TEMPORAL ===
@@ -435,6 +435,53 @@ def enviar_menu_productos(numero):
         enviar_menu_principal(numero)
         return False
 
+def enviar_menu_pdf(numero):
+    """Envía el menú en formato PDF al usuario"""
+    try:
+        # URL del PDF del menú (debes reemplazar esto con tu URL real)
+        url_pdf = "https://menu.emaconor.site/menu.pdf"
+        
+        url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "messaging_product": "whatsapp",
+            "to": numero,
+            "type": "document",
+            "document": {
+                "link": url_pdf,
+                "caption": "🍽️ *Menú Mezón Peruano* 🇵🇪\n\nNuestra carta completa con todos los platos y precios.",
+                "filename": "menu-mezon-peruano.pdf"
+            }
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        
+        if response.status_code == 200:
+            print(f"→ PDF del menú enviado a {numero}")
+            
+            # Mensaje adicional después del PDF
+            time.sleep(1)
+            mensaje_adicional = """📋 *¿Necesitas ayuda para elegir?*
+
+Conoce más detalles sobre algún plato o explora nuestras categorías en el menú interactivo.
+Selecciona una opción a continuación:"""
+            enviar_mensaje(numero, mensaje_adicional)
+            
+            return True
+        else:
+            print(f"🔴 Error enviando PDF: {response.status_code} - {response.text}")
+            # Fallback: enviar menú interactivo si el PDF falla
+            enviar_mensaje(numero, "❌ No pude cargar el menú PDF. Te muestro nuestras opciones:")
+            
+    except Exception as e:
+        print(f"🔴 Error enviando PDF del menú: {e}")
+        # Fallback a menú interactivo
+        enviar_mensaje(numero, "❌ Error al cargar el menú PDF. Te muestro nuestras opciones:")
+
 def enviar_detalle_producto(numero, producto_id):
     """Envía los detalles de un producto específico"""
     try:
@@ -721,11 +768,11 @@ def webhook_whatsapp():
                 if success:
                     mensaje_exito = f"""✅ *¡Registro completado exitosamente!*
 
-                    📋 *Tus datos registrados:*
-                    👤 Nombre: {nombre}
-                    📞 Teléfono: {telefono}
-                    🏠 Dirección: {direccion}
-                    🆔 Cédula: {cedula}
+📋 *Tus datos registrados:*
+👤 Nombre: {nombre}
+📞 Teléfono: {telefono}
+🏠 Dirección: {direccion}
+🆔 Cédula: {cedula}
 
                     ¡Bienvenido a Mezón Peruano! 🇵🇪"""
                     enviar_mensaje(telefono, mensaje_exito)
@@ -791,20 +838,21 @@ def webhook_whatsapp():
                 return jsonify({"status": "menu principal"}), 200
             
             elif mensaje == "ver_menu":
+                enviar_menu_pdf(telefono)
                 enviar_menu_productos(telefono)
                 return jsonify({"status": "ver menu"}), 200
             
             elif mensaje == "informacion":
                 info_texto = """ℹ️ *Información - Mezón Peruano* 🇵🇪
 
-                🍽️ Auténtico sabor peruano en cada plato
+🍽️ Auténtico sabor peruano en cada plato
 
-                📍 *Dirección:* Casa Terrarosa - Zipaquirá, Cundinamarca
-                📞 *Teléfono:* +1-234-567-8900
-                🕒 *Horario:* 11:00 AM - 9:00 PM
-                📅 *Abierto:* Lunes a Domingo
+📍 *Dirección:* Casa Terrarosa - Zipaquirá, Cundinamarca
+📞 *Teléfono:* +1-234-567-8900
+🕒 *Horario:* 11:00 AM - 9:00 PM
+📅 *Abierto:* Lunes a Domingo
 
-                ¡Te esperamos! 🎉"""
+        ¡Te esperamos! 🎉"""
 
                 enviar_mensaje(telefono, info_texto)
                 nombre = SESIONES_ACTIVAS[telefono].get("nombre")
@@ -852,18 +900,19 @@ def webhook_whatsapp():
             return jsonify({"status": "registro inicio"}), 200
 
         elif mensaje == "ver_menu":
+            enviar_menu_pdf(telefono)
             enviar_menu_productos(telefono)
             return jsonify({"status": "ver menu"}), 200
 
         elif mensaje == "informacion":
             info_texto = """ℹ️ *Información - Mezón Peruano* 🇵🇪
 
-                🍽️ Auténtico sabor peruano en cada plato
+🍽️ Auténtico sabor peruano en cada plato
 
-                📍 *Dirección:* Casa Terrarosa - Zipaquirá, Cundinamarca
-                📞 *Teléfono:* +1-234-567-8900
-                🕒 *Horario:* 11:00 AM - 9:00 PM
-                📅 *Abierto:* Lunes a Domingo
+📍 *Dirección:* Casa Terrarosa - Zipaquirá, Cundinamarca
+📞 *Teléfono:* +1-234-567-8900
+🕒 *Horario:* 11:00 AM - 9:00 PM
+📅 *Abierto:* Lunes a Domingo
 
                 ¡Te esperamos! 🎉"""
             enviar_mensaje(telefono, info_texto)
