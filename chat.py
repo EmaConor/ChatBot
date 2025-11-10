@@ -2,6 +2,7 @@
 from flask import Flask, jsonify, request, redirect
 import DataBases.ClientesController as BDC
 import DataBases.productsController as DBP
+import DataBases.PedidosController as DBPedidos
 import requests
 import re
 import html
@@ -12,7 +13,7 @@ import pytz
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
-TOKEN = "EAApdsnrt0rUBP2v2NcfQnU09cF0ZBjgf9jSnDIJjrDYDzwmnYKpb2jqmqXdvWelFi6p4u7UByevUqP9igDqMPd239zAoFdKwZAIZCl3GdRf3QCZCRZBT4mgFlcpn08fIai03CmYs1wl1ZA9cIxni8H2nV3smafluMeOSkRLZAw31qSfmOuNGLix7CALLzCMZBGOthprmM0et2aEP6QerqZAyPEzxSl9ZAHwjAaElxLXqZCv87bpLAZB4iHtFhGYT7it3jz25P6vSnWgYGLheqr89TV4KCQZDZD"
+TOKEN = "EAApdsnrt0rUBPZB0R1nnOctj4kOfveMT46tsWRnP6rYjrbS1MG3ZCfZB8Pn0nBcCBnhvjsc6e75oZCqf05kmr4XUoZBa0DBjK3kDY4OwjejIHLJJPv3DAQigMDZADfbbyS37xk4g4E6ZBbkq00t5y3KZBLB2oLrJAh9CwomOOwROYYNMkyEuZCzhBolECBiy9SgCOyuME3XbXxIIRkaZAYJSUaJDIZBEOPGZBVmPPB6ZAZCMoEMvWTIx63xNA0ZAn8yckZApY7SEkwSsZCSMcF5mZCBZAoTdn2U"
 PHONE_NUMBER_ID = "863285753529334"
 
 # === BASE DE DATOS TEMPORAL ===
@@ -20,6 +21,7 @@ USUARIOS = {}
 LOGIN_ATTEMPTS = {}
 SESIONES_ACTIVAS = {}
 CARRITOS = {}  # {telefono: [{"producto_id": id, "nombre": nombre, "precio": precio, "cantidad": cantidad}]}
+NOTAS_PRODUCTOS = {}  # {telefono: {producto_id: nota}}
 
 # === RUTAS BÁSICAS ===
 @app.route('/')
@@ -55,6 +57,7 @@ def home():
                     <li>⚙️ Gestión de sesiones con menús dinámicos</li>
                     <li>🛒 Sistema de carrito de compras</li>
                     <li>📦 Gestión de pedidos integrada</li>
+                    <li>📝 Notas por producto</li>
                 </ul>
             </div>
         </div>
@@ -239,7 +242,43 @@ def vaciar_carrito(telefono):
         return True
     return False
 
+def obtener_nota_producto(telefono, producto_id):
+    """Obtiene la nota de un producto"""
+    if telefono in NOTAS_PRODUCTOS and producto_id in NOTAS_PRODUCTOS[telefono]:
+        return NOTAS_PRODUCTOS[telefono][producto_id]
+    return ""
+
+def guardar_nota_producto(telefono, producto_id, nota):
+    """Guarda la nota de un producto"""
+    if telefono not in NOTAS_PRODUCTOS:
+        NOTAS_PRODUCTOS[telefono] = {}
+    NOTAS_PRODUCTOS[telefono][producto_id] = nota
+
 # === FUNCIONES PARA MENÚS INTERACTIVOS ===
+def validar_titulo_seccion(titulo):
+    """Valida y ajusta el título de sección al límite de WhatsApp"""
+    if len(titulo) > 24:
+        # Acortar el título manteniendo la esencia
+        if "Categorías" in titulo:
+            return "📂 Categorías"
+        elif "Opciones" in titulo:
+            return "📋 Opciones"
+        elif "Servicios" in titulo:
+            return "🍽️ Servicios"
+        elif "Mi Cuenta" in titulo:
+            return "👤 Mi Cuenta"
+        elif "Navegación" in titulo:
+            return "🔙 Navegación"
+        elif "Información" in titulo:
+            return "📝 Información"
+        elif "Actualizar" in titulo:
+            return "✏️ Actualizar"
+        elif "Productos" in titulo:
+            return "🍽️ Productos"
+        else:
+            return titulo[:21] + "..."
+    return titulo
+
 def enviar_mensaje(numero, texto):
     """Envía mensaje de texto simple"""
     try:
@@ -268,6 +307,11 @@ def enviar_mensaje(numero, texto):
 def enviar_menu_interactivo(numero, titulo_boton, texto_cuerpo, secciones):
     """Envía un menú interactivo con lista de opciones"""
     try:
+        # Validar y ajustar títulos de secciones
+        for seccion in secciones:
+            if 'title' in seccion:
+                seccion['title'] = validar_titulo_seccion(seccion['title'])
+        
         # Verificar que no excedamos el límite de 10 filas en total
         total_rows = 0
         for seccion in secciones:
@@ -453,7 +497,7 @@ def enviar_menu_actualizacion(numero):
     """Menú para seleccionar qué dato actualizar"""
     secciones = [
         {
-            "title": "¿Qué deseas actualizar?",
+            "title": "✏️ Actualizar Datos",
             "rows": [
                 {
                     "id": "actualizar_nombre",
@@ -507,8 +551,12 @@ def enviar_menu_carrito(numero):
     resumen = "🛒 *Tu Carrito de Compras*\n\n"
     for i, item in enumerate(carrito, 1):
         subtotal = item["precio"] * item["cantidad"]
+        nota = obtener_nota_producto(numero, item["producto_id"])
         resumen += f"{i}. {item['nombre']}\n"
-        resumen += f"   Cantidad: {item['cantidad']} x ${item['precio']:,} = ${subtotal:,}\n\n"
+        resumen += f"   Cantidad: {item['cantidad']} x ${item['precio']:,} = ${subtotal:,}\n"
+        if nota:
+            resumen += f"   📝 Nota: {nota}\n"
+        resumen += "\n"
     
     resumen += f"💰 *Total: ${total:,}*"
     
@@ -519,7 +567,7 @@ def enviar_menu_carrito(numero):
     # Menú de opciones del carrito
     secciones = [
         {
-            "title": "📋 Opciones del Carrito",
+            "title": "🛒 Opciones Carrito",
             "rows": [
                 {
                     "id": "confirmar_pedido",
@@ -539,12 +587,12 @@ def enviar_menu_carrito(numero):
             ]
         },
         {
-            "title": "📝 Información Adicional",
+            "title": "📝 Información",
             "rows": [
                 {
-                    "id": "agregar_descripcion",
-                    "title": "📄 Agregar Descripción",
-                    "description": "Añadir notas al pedido"
+                    "id": "agregar_notas",
+                    "title": "📄 Agregar Notas",
+                    "description": "Añadir notas a los productos"
                 },
                 {
                     "id": "volver_menu_principal",
@@ -583,6 +631,9 @@ def enviar_menu_edicion_carrito(numero):
     
     # Sección para cada producto en el carrito (máximo 4 productos)
     for i, item in enumerate(carrito[:4], 1):
+        nota_actual = obtener_nota_producto(numero, item['producto_id'])
+        tiene_nota = "📝" if nota_actual else ""
+        
         secciones.append({
             "title": f"📦 {item['nombre'][:20]}...",
             "rows": [
@@ -590,6 +641,11 @@ def enviar_menu_edicion_carrito(numero):
                     "id": f"editar_cantidad_{item['producto_id']}",
                     "title": f"✏️ Cantidad ({item['cantidad']})",
                     "description": f"Cambiar cantidad"
+                },
+                {
+                    "id": f"agregar_nota_{item['producto_id']}",
+                    "title": f"📝 Agregar Nota {tiene_nota}",
+                    "description": f"Añadir nota especial"
                 },
                 {
                     "id": f"eliminar_producto_{item['producto_id']}",
@@ -617,6 +673,68 @@ def enviar_menu_edicion_carrito(numero):
         "Selecciona qué producto deseas modificar:",
         secciones
     )
+
+def enviar_menu_agregar_nota(numero, producto_id):
+    """Envía menú para agregar nota a un producto específico"""
+    try:
+        producto = DBP.buscar_producto_por_id(producto_id)
+        if not producto:
+            enviar_mensaje(numero, "❌ Producto no encontrado.")
+            return False
+        
+        nota_actual = obtener_nota_producto(numero, producto_id)
+        
+        secciones = [
+            {
+                "title": f"📝 {producto['nombre'][:20]}",
+                "rows": [
+                    {
+                        "id": f"escribir_nota_{producto_id}",
+                        "title": "✏️ Escribir Nota",
+                        "description": "Escribir una nota personalizada"
+                    }
+                ]
+            }
+        ]
+        
+        if nota_actual:
+            secciones[0]["rows"].append({
+                "id": f"ver_nota_{producto_id}",
+                "title": "👀 Ver Nota Actual",
+                "description": "Ver la nota que tienes guardada"
+            })
+            secciones[0]["rows"].append({
+                "id": f"eliminar_nota_{producto_id}",
+                "title": "🗑️ Eliminar Nota",
+                "description": "Quitar la nota actual"
+            })
+        
+        secciones.append({
+            "title": "🔙 Navegación",
+            "rows": [
+                {
+                    "id": "volver_edicion_carrito",
+                    "title": "Volver a Edición",
+                    "description": "Regresar al menú de edición"
+                }
+            ]
+        })
+        
+        mensaje_cuerpo = f"📝 *Agregar nota para {producto['nombre']}*"
+        if nota_actual:
+            mensaje_cuerpo += f"\n\nNota actual: \"{nota_actual}\""
+        
+        return enviar_menu_interactivo(
+            numero,
+            "📝 Gestionar Nota",
+            mensaje_cuerpo,
+            secciones
+        )
+        
+    except Exception as e:
+        print(f"🔴 Error mostrando menú de notas: {e}")
+        enviar_mensaje(numero, "❌ Error al cargar opciones de nota.")
+        return False
 
 def enviar_menu_categorias(numero):
     """Envía un menú con categorías"""
@@ -648,7 +766,7 @@ def enviar_menu_categorias(numero):
             })
         
         secciones.append({
-            "title": "📂 Categorías Disponibles",
+            "title": "📂 Categorías",
             "rows": rows_categorias
         })
         
@@ -707,8 +825,13 @@ def enviar_productos_categoria(numero, categoria):
                 "description": precio_formateado
             })
         
+        # Acortar el título de la categoría si es necesario
+        titulo_categoria = f"🍽️ {categoria}"
+        if len(titulo_categoria) > 24:
+            titulo_categoria = f"🍽️ {categoria[:18]}..."
+        
         secciones.append({
-            "title": f"🍽️ {categoria}",
+            "title": titulo_categoria,
             "rows": rows_productos
         })
         
@@ -787,6 +910,47 @@ Explora nuestras categorías en el menú interactivo."""
     except Exception as e:
         print(f"🔴 Error enviando PDF del menú: {e}")
         enviar_mensaje(numero, "❌ Error al cargar el menú PDF. Te muestro nuestras categorías:")
+
+def guardar_pedido_en_bd(telefono, descripcion_general=""):
+    """Guarda el pedido en la base de datos"""
+    try:
+        if telefono not in SESIONES_ACTIVAS:
+            return False, "❌ Debes iniciar sesión para guardar el pedido"
+        
+        carrito = obtener_carrito(telefono)
+        if not carrito:
+            return False, "❌ El carrito está vacío"
+        
+        # Preparar productos para la base de datos
+        productos_pedido = []
+        for item in carrito:
+            nota = obtener_nota_producto(telefono, item["producto_id"])
+            productos_pedido.append({
+                'producto_id': item['producto_id'],
+                'cantidad': item['cantidad'],
+                'notas': nota
+            })
+        
+        # Crear pedido en la base de datos usando el teléfono
+        pedido_id = DBPedidos.crear_pedido_por_telefono(
+            telefono=telefono,
+            productos=productos_pedido,
+            descripcion=descripcion_general
+        )
+        
+        if pedido_id:
+            # Limpiar carrito y notas después de guardar
+            vaciar_carrito(telefono)
+            if telefono in NOTAS_PRODUCTOS:
+                del NOTAS_PRODUCTOS[telefono]
+            
+            return True, f"✅ *Pedido #{pedido_id} guardado correctamente*"
+        else:
+            return False, "❌ Error al guardar el pedido en el sistema"
+            
+    except Exception as e:
+        print(f"🔴 Error guardando pedido: {e}")
+        return False, "❌ Error al procesar el pedido"
 
 # === WEBHOOK PRINCIPAL ===
 @app.route("/webhook/", methods=["POST", "GET"])
@@ -1042,6 +1206,16 @@ def webhook_whatsapp():
                     enviar_mensaje(telefono, "❌ Por favor ingresa un número válido para la cantidad:")
                 return jsonify({"status": "cantidad actualizada"}), 200
 
+            # === PROCESO DE AGREGAR NOTA ===
+            elif etapa == "agregando_nota":
+                producto_id = USUARIOS[telefono]["producto_id"]
+                guardar_nota_producto(telefono, producto_id, mensaje)
+                enviar_mensaje(telefono, f"✅ *Nota guardada correctamente*\n\nTu nota ha sido guardada para este producto.")
+                del USUARIOS[telefono]
+                time.sleep(1)
+                enviar_menu_edicion_carrito(telefono)
+                return jsonify({"status": "nota guardada"}), 200
+
         # === SEGUNDO: Manejo de usuarios logueados ===
         if telefono in SESIONES_ACTIVAS:
             print(f"🔐 Usuario {telefono} tiene sesión activa")
@@ -1160,6 +1334,10 @@ def webhook_whatsapp():
             enviar_menu_principal(telefono)
             return jsonify({"status": "volver menu"}), 200
 
+        elif mensaje == "volver_edicion_carrito":
+            enviar_menu_edicion_carrito(telefono)
+            return jsonify({"status": "volver edicion carrito"}), 200
+
         # Manejar edición de cantidades
         elif mensaje.startswith("editar_cantidad_"):
             producto_id = int(mensaje.replace("editar_cantidad_", ""))
@@ -1170,13 +1348,60 @@ def webhook_whatsapp():
             enviar_mensaje(telefono, "✏️ Ingresa la nueva cantidad para este producto:")
             return jsonify({"status": "editando cantidad"}), 200
 
+        # Manejar notas de productos
+        elif mensaje.startswith("agregar_nota_"):
+            producto_id = int(mensaje.replace("agregar_nota_", ""))
+            enviar_menu_agregar_nota(telefono, producto_id)
+            return jsonify({"status": "menu agregar nota"}), 200
+
+        elif mensaje.startswith("escribir_nota_"):
+            producto_id = int(mensaje.replace("escribir_nota_", ""))
+            USUARIOS[telefono] = {
+                "etapa": "agregando_nota",
+                "producto_id": producto_id
+            }
+            enviar_mensaje(telefono, "📝 *Escribe la nota para este producto:*\n\n(Puedes escribir cualquier instrucción especial)")
+            return jsonify({"status": "escribiendo nota"}), 200
+
+        elif mensaje.startswith("ver_nota_"):
+            producto_id = int(mensaje.replace("ver_nota_", ""))
+            nota = obtener_nota_producto(telefono, producto_id)
+            producto = DBP.buscar_producto_por_id(producto_id)
+            if producto and nota:
+                enviar_mensaje(telefono, f"📝 *Nota para {producto['nombre']}:*\n\n\"{nota}\"")
+            else:
+                enviar_mensaje(telefono, "ℹ️ No hay nota guardada para este producto.")
+            time.sleep(1)
+            enviar_menu_agregar_nota(telefono, producto_id)
+            return jsonify({"status": "ver nota"}), 200
+
+        elif mensaje.startswith("eliminar_nota_"):
+            producto_id = int(mensaje.replace("eliminar_nota_", ""))
+            if telefono in NOTAS_PRODUCTOS and producto_id in NOTAS_PRODUCTOS[telefono]:
+                del NOTAS_PRODUCTOS[telefono][producto_id]
+                enviar_mensaje(telefono, "✅ Nota eliminada correctamente.")
+            else:
+                enviar_mensaje(telefono, "ℹ️ No había nota para eliminar.")
+            time.sleep(1)
+            enviar_menu_agregar_nota(telefono, producto_id)
+            return jsonify({"status": "eliminar nota"}), 200
+
         elif mensaje.startswith("eliminar_producto_"):
             producto_id = int(mensaje.replace("eliminar_producto_", ""))
             eliminar_del_carrito(telefono, producto_id)
+            # También eliminar la nota si existe
+            if telefono in NOTAS_PRODUCTOS and producto_id in NOTAS_PRODUCTOS[telefono]:
+                del NOTAS_PRODUCTOS[telefono][producto_id]
             enviar_mensaje(telefono, "✅ Producto eliminado del carrito")
             time.sleep(1)
             enviar_menu_carrito(telefono)
             return jsonify({"status": "producto eliminado"}), 200
+
+        elif mensaje == "agregar_notas":
+            enviar_mensaje(telefono, "📝 *Agregar Notas a Productos*\n\nPara agregar notas a productos específicos, ve a 'Editar Carrito' y selecciona 'Agregar Nota' en cada producto.")
+            time.sleep(1)
+            enviar_menu_carrito(telefono)
+            return jsonify({"status": "info notas"}), 200
 
         elif mensaje == "confirmar_pedido":
             if telefono not in SESIONES_ACTIVAS:
@@ -1190,33 +1415,34 @@ def webhook_whatsapp():
                 enviar_menu_carrito(telefono)
                 return jsonify({"status": "carrito vacio"}), 200
             
-            total = calcular_total_carrito(telefono)
-            mensaje_confirmacion = f"""✅ *Pedido Confirmado* 🎉
+            # Guardar pedido en la base de datos
+            success, mensaje_respuesta = guardar_pedido_en_bd(telefono)
+            enviar_mensaje(telefono, mensaje_respuesta)
+            
+            if success:
+                # Mostrar resumen del pedido guardado
+                total = calcular_total_carrito(telefono)  # Antes de vaciar el carrito
+                mensaje_confirmacion = f"""✅ *Pedido Confirmado* 🎉
 
 🛒 *Resumen de tu pedido:*
 """
-            for item in carrito:
-                subtotal = item["precio"] * item["cantidad"]
-                mensaje_confirmacion += f"• {item['nombre']} x{item['cantidad']} = ${subtotal:,}\n"
-            
-            mensaje_confirmacion += f"\n💰 *Total: ${total:,}*"
-            mensaje_confirmacion += "\n\n📞 Nos contactaremos contigo pronto para coordinar la entrega."
-            
-            enviar_mensaje(telefono, mensaje_confirmacion)
-            
-            # Vaciar carrito después de confirmar
-            vaciar_carrito(telefono)
+                for item in carrito:
+                    subtotal = item["precio"] * item["cantidad"]
+                    nota = obtener_nota_producto(telefono, item["producto_id"])
+                    mensaje_confirmacion += f"• {item['nombre']} x{item['cantidad']} = ${subtotal:,}"
+                    if nota:
+                        mensaje_confirmacion += f" (Nota: {nota})"
+                    mensaje_confirmacion += "\n"
+                
+                mensaje_confirmacion += f"\n💰 *Total: ${total:,}*"
+                mensaje_confirmacion += "\n\n📞 Nos contactaremos contigo pronto para coordinar la entrega."
+                
+                enviar_mensaje(telefono, mensaje_confirmacion)
             
             time.sleep(2)
             enviar_menu_principal(telefono)
             
             return jsonify({"status": "pedido confirmado"}), 200
-
-        elif mensaje == "agregar_descripcion":
-            enviar_mensaje(telefono, "📝 *Agregar Descripción al Pedido*\n\nEsta funcionalidad estará disponible próximamente.")
-            time.sleep(1)
-            enviar_menu_carrito(telefono)
-            return jsonify({"status": "descripcion"}), 200
 
         elif mensaje == "mi_informacion":
             try:
@@ -1264,5 +1490,7 @@ if __name__ == "__main__":
     print("✨ Menús interactivos habilitados (Select Box)")
     print("🛒 Sistema de carrito de compras activado")
     print("📂 Navegación por categorías implementada")
+    print("📝 Sistema de notas por producto activado")
+    print("💾 Guardado en base de datos implementado")
     print("⚠️  Límites implementados: máximo 10 filas por menú")
     app.run(debug=True, host="0.0.0.0", port=5000)

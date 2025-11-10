@@ -46,6 +46,12 @@ def init_db():
 # Inicializar la base de datos al importar el módulo
 init_db()
 
+# === FUNCIÓN PARA HASHEAR CÉDULA (compatibilidad) ===
+def hash_cedula(cedula: str, salt: str):
+    import hashlib
+    hash_obj = hashlib.sha256((cedula + salt).encode("utf-8"))
+    return hash_obj.hexdigest()
+
 # === FUNCIÓN PARA CREAR UNA FACTURA/PEDIDO ===
 def crear_pedido(cedula_cliente: str, productos: List[Dict], descripcion: str = "") -> Optional[int]:
     """
@@ -63,20 +69,27 @@ def crear_pedido(cedula_cliente: str, productos: List[Dict], descripcion: str = 
     cursor = conn.cursor()
     
     try:
-        # Verificar que el cliente existe (buscando por cédula)
+        # Primero necesitamos obtener el salt del cliente para calcular el hash
         cursor.execute('''
-            SELECT cedula_hash FROM clientes 
-            WHERE cedula_hash IN (
-                SELECT cedula_hash FROM clientes 
-                WHERE cedula_hash = ? OR id IN (
-                    SELECT id FROM clientes WHERE cedula_hash = ?
-                )
-            )
-        ''', (cedula_cliente, cedula_cliente))
+            SELECT salt FROM clientes WHERE numero = ?
+        ''', (cedula_cliente,))
+        
+        resultado_salt = cursor.fetchone()
+        if not resultado_salt:
+            print("❌ Cliente no encontrado por número.")
+            return None
+        
+        salt = resultado_salt[0]
+        cedula_hash = hash_cedula(cedula_cliente, salt)
+        
+        # Verificar que el cliente existe (buscando por cédula hash)
+        cursor.execute('''
+            SELECT cedula_hash FROM clientes WHERE cedula_hash = ?
+        ''', (cedula_hash,))
         
         cliente = cursor.fetchone()
         if not cliente:
-            print("❌ Cliente no encontrado.")
+            print("❌ Cliente no encontrado por cédula hash.")
             return None
         
         # Calcular precio total y verificar productos
@@ -109,7 +122,7 @@ def crear_pedido(cedula_cliente: str, productos: List[Dict], descripcion: str = 
         cursor.execute('''
             INSERT INTO facturas (precio_total, descripcion, cedula_cliente, estado)
             VALUES (?, ?, ?, 'Pedido')
-        ''', (precio_total, descripcion, cedula_cliente))
+        ''', (precio_total, descripcion, cedula_hash))
         
         factura_id = cursor.lastrowid
         
@@ -122,6 +135,87 @@ def crear_pedido(cedula_cliente: str, productos: List[Dict], descripcion: str = 
         
         conn.commit()
         print(f"✅ Pedido #{factura_id} creado correctamente. Total: ${precio_total:,.2f}")
+        return factura_id
+        
+    except Exception as e:
+        conn.rollback()
+        print(f"❌ Error al crear pedido: {e}")
+        return None
+    finally:
+        conn.close()
+
+# === FUNCIÓN PARA CREAR PEDIDO POR NÚMERO DE TELÉFONO ===
+def crear_pedido_por_telefono(telefono: str, productos: List[Dict], descripcion: str = "") -> Optional[int]:
+    """
+    Crea un nuevo pedido/factura en el sistema usando el número de teléfono del cliente.
+    
+    Args:
+        telefono: Número de teléfono del cliente
+        productos: Lista de diccionarios con {'producto_id': int, 'cantidad': int, 'notas': str}
+        descripcion: Descripción general del pedido
+    
+    Returns:
+        ID del pedido creado o None si hay error
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        # Buscar cliente por número de teléfono
+        cursor.execute('''
+            SELECT cedula_hash FROM clientes WHERE numero = ?
+        ''', (telefono,))
+        
+        cliente = cursor.fetchone()
+        if not cliente:
+            print(f"❌ Cliente con teléfono {telefono} no encontrado.")
+            return None
+        
+        cedula_hash = cliente[0]
+        
+        # Calcular precio total y verificar productos
+        precio_total = 0
+        items_validos = []
+        
+        for producto in productos:
+            cursor.execute('''
+                SELECT id, nombre, precio, disponible FROM productos 
+                WHERE id = ? AND disponible = 1
+            ''', (producto['producto_id'],))
+            
+            producto_info = cursor.fetchone()
+            if not producto_info:
+                print(f"❌ Producto ID {producto['producto_id']} no disponible o no encontrado.")
+                return None
+            
+            precio_unitario = producto_info[2]
+            cantidad = producto['cantidad']
+            precio_total += precio_unitario * cantidad
+            
+            items_validos.append({
+                'producto_id': producto['producto_id'],
+                'cantidad': cantidad,
+                'precio_unitario': precio_unitario,
+                'notas': producto.get('notas', '')
+            })
+        
+        # Insertar la factura
+        cursor.execute('''
+            INSERT INTO facturas (precio_total, descripcion, cedula_cliente, estado)
+            VALUES (?, ?, ?, 'Pedido')
+        ''', (precio_total, descripcion, cedula_hash))
+        
+        factura_id = cursor.lastrowid
+        
+        # Insertar los items del pedido
+        for item in items_validos:
+            cursor.execute('''
+                INSERT INTO items_pedido (factura_id, producto_id, cantidad, precio_unitario, notas)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (factura_id, item['producto_id'], item['cantidad'], item['precio_unitario'], item['notas']))
+        
+        conn.commit()
+        print(f"✅ Pedido #{factura_id} creado correctamente para teléfono {telefono}. Total: ${precio_total:,.2f}")
         return factura_id
         
     except Exception as e:
@@ -324,6 +418,42 @@ def obtener_pedidos_cliente(cedula_cliente: str) -> List[Dict]:
     finally:
         conn.close()
 
+# === FUNCIÓN PARA OBTENER PEDIDOS POR TELÉFONO ===
+def obtener_pedidos_por_telefono(telefono: str) -> List[Dict]:
+    """
+    Obtiene todos los pedidos de un cliente por su número de teléfono.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            SELECT f.id, f.precio_total, f.descripcion, f.fecha, f.estado
+            FROM facturas f
+            JOIN clientes c ON f.cedula_cliente = c.cedula_hash
+            WHERE c.numero = ?
+            ORDER BY f.fecha DESC
+        ''', (telefono,))
+        
+        pedidos = []
+        for row in cursor.fetchall():
+            pedido = {
+                'id': row[0],
+                'precio_total': row[1],
+                'descripcion': row[2],
+                'fecha': row[3],
+                'estado': row[4]
+            }
+            pedidos.append(pedido)
+        
+        return pedidos
+        
+    except Exception as e:
+        print(f"❌ Error al obtener pedidos por teléfono: {e}")
+        return []
+    finally:
+        conn.close()
+
 # === FUNCIÓN PARA ELIMINAR PEDIDO ===
 def eliminar_pedido(pedido_id: int) -> bool:
     """
@@ -391,9 +521,9 @@ if __name__ == "__main__":
         {'producto_id': 7, 'cantidad': 3, 'notas': 'Sin hielo'}
     ]
     
-    # Crear pedido
-    pedido_id = crear_pedido(
-        cedula_cliente="123456789",  # Cédula del cliente
+    # Crear pedido por teléfono (método recomendado)
+    pedido_id = crear_pedido_por_telefono(
+        telefono="573012331635",  # Número de teléfono del cliente
         productos=productos_ejemplo,
         descripcion="Pedido para llevar"
     )
