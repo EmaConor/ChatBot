@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mezon Peruano - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white border-b border-orange-200 shadow-sm sticky top-0 z-10">
+        <div class="max-w-7xl mx-auto px-4 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="bg-gradient-to-br from-orange-500 to-yellow-500 p-2 rounded-xl">
+                        <i class="fas fa-utensils text-white text-xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-orange-900 text-2xl font-bold">Mezon Peruano</h1>
+                        <p class="text-orange-600 text-sm">Sistema de Gestión de Pedidos</p>
+                    </div>
+                </div>
+                <div class="flex gap-2" id="navButtons">
+                    <!-- Los botones se generan con JavaScript -->
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 py-8">
+        <div id="loading" class="flex justify-center items-center h-64">
+            <div class="text-center">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
+                <p class="text-orange-600 text-lg">Cargando aplicación...</p>
+            </div>
+        </div>
+
+        <div id="content" class="hidden">
+            <!-- El contenido se carga dinámicamente -->
+        </div>
+    </main>
+
+    <script>
+        // Estado de la aplicación
+        const appState = {
+            currentView: 'dashboard',
+            dashboardData: null,
+            pedidos: [],
+            loading: true
+        };
+
+        // API Base
+        const API_BASE = '/api';
+
+        // Utilidades
+        const utils = {
+            formatCurrency(amount) {
+                if (!amount) return '$0';
+                return new Intl.NumberFormat('es-CO', {
+                    style: 'currency',
+                    currency: 'COP',
+                    minimumFractionDigits: 0,
+                }).format(amount);
+            },
+
+            formatDate(dateStr) {
+                try {
+                    const date = new Date(dateStr);
+                    return new Intl.DateTimeFormat('es-CO', {
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                    }).format(date);
+                } catch {
+                    return 'Fecha inválida';
+                }
+            },
+
+            getEstadoColor(estado) {
+                const colors = {
+                    'Pedido': 'bg-blue-100 text-blue-700 border-blue-200',
+                    'Pagado': 'bg-green-100 text-green-700 border-green-200',
+                    'En envio': 'bg-yellow-100 text-yellow-700 border-yellow-200',
+                    'Enviado': 'bg-purple-100 text-purple-700 border-purple-200'
+                };
+                return colors[estado] || 'bg-gray-100 text-gray-700 border-gray-200';
+            },
+
+            showLoading() {
+                document.getElementById('loading').classList.remove('hidden');
+                document.getElementById('content').classList.add('hidden');
+            },
+
+            hideLoading() {
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('content').classList.remove('hidden');
+            }
+        };
+
+        // Servicios de API
+        const apiService = {
+            async get(url) {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Error en la petición');
+                return response.json();
+            },
+
+            async getDashboardStats() {
+                const [stats, estados, productos, ventas] = await Promise.all([
+                    this.get(`${API_BASE}/dashboard/stats`),
+                    this.get(`${API_BASE}/dashboard/estados-pedidos`),
+                    this.get(`${API_BASE}/dashboard/productos-mas-vendidos`),
+                    this.get(`${API_BASE}/dashboard/ventas-recientes`)
+                ]);
+
+                return {
+                    ...stats,
+                    estadosPedidos: estados,
+                    productosMasVendidos: productos,
+                    ventasRecientes: ventas
+                };
+            },
+
+            async getPedidos(estado = 'Todos') {
+                const url = estado !== 'Todos' 
+                    ? `${API_BASE}/pedidos?estado=${estado}`
+                    : `${API_BASE}/pedidos`;
+                return this.get(url);
+            }
+        };
+
+        // Componentes de UI
+        const components = {
+            // Navegación
+            renderNavButtons() {
+                const navButtons = document.getElementById('navButtons');
+                const buttons = [
+                    { id: 'dashboard', text: 'Dashboard', icon: 'fas fa-chart-bar' },
+                    { id: 'orders', text: 'Pedidos', icon: 'fas fa-shopping-cart' }
+                ];
+
+                navButtons.innerHTML = buttons.map(btn => `
+                    <button onclick="app.changeView('${btn.id}')" 
+                            class="px-6 py-3 rounded-lg transition-all font-semibold flex items-center gap-2 ${appState.currentView === btn.id ? 'bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'}">
+                        <i class="${btn.icon}"></i>
+                        ${btn.text}
+                    </button>
+                `).join('');
+            },
+
+            // Dashboard
+            renderDashboard() {
+                const { dashboardData } = appState;
+                if (!dashboardData) return '<div class="text-center text-orange-600">No hay datos del dashboard</div>';
+
+                return `
+                    <div class="space-y-6 fade-in">
+                        ${this.renderStatsCards()}
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            ${this.renderEstadosPedidos()}
+                            ${this.renderProductosMasVendidos()}
+                        </div>
+                        ${this.renderVentasRecientes()}
+                    </div>
+                `;
+            },
+
+            renderStatsCards() {
+                const { totalVentas, totalPedidos, totalClientes, pedidosHoy, productosActivos } = appState.dashboardData;
+                
+                const cards = [
+                    { 
+                        title: 'Ventas Totales', 
+                        value: utils.formatCurrency(totalVentas), 
+                        icon: 'fas fa-dollar-sign',
+                        gradient: 'from-green-500 to-emerald-600',
+                        subtitle: 'Ingresos totales'
+                    },
+                    { 
+                        title: 'Total Pedidos', 
+                        value: totalPedidos, 
+                        icon: 'fas fa-shopping-cart',
+                        gradient: 'from-blue-500 to-indigo-600',
+                        subtitle: `${pedidosHoy} hoy`
+                    },
+                    { 
+                        title: 'Clientes Activos', 
+                        value: totalClientes, 
+                        icon: 'fas fa-users',
+                        gradient: 'from-purple-500 to-pink-600',
+                        subtitle: 'Clientes registrados'
+                    },
+                    { 
+                        title: 'Productos Activos', 
+                        value: productosActivos, 
+                        icon: 'fas fa-box',
+                        gradient: 'from-orange-500 to-red-600',
+                        subtitle: 'En el menú'
+                    }
+                ];
+
+                return `
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        ${cards.map(card => `
+                            <div class="bg-gradient-to-br ${card.gradient} rounded-2xl p-6 text-white shadow-xl card-hover">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="bg-white/20 p-3 rounded-xl backdrop-blur-sm">
+                                        <i class="${card.icon} text-white text-lg"></i>
+                                    </div>
+                                    <i class="fas fa-chart-line opacity-80"></i>
+                                </div>
+                                <p class="text-white/90 text-sm mb-1">${card.title}</p>
+                                <p class="text-2xl font-bold">${card.value}</p>
+                                ${card.subtitle ? `<p class="text-xs text-white/70 mt-1">${card.subtitle}</p>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            },
+
+            renderEstadosPedidos() {
+                const { estadosPedidos } = appState.dashboardData;
+                
+                return `
+                    <div class="bg-white rounded-2xl p-6 shadow-lg border border-orange-100">
+                        <h3 class="text-orange-900 mb-4 flex items-center gap-2 text-lg font-semibold">
+                            <i class="fas fa-shopping-cart text-orange-500"></i>
+                            Estado de Pedidos
+                        </h3>
+                        <div class="space-y-3">
+                            ${Object.entries(estadosPedidos).map(([estado, cantidad]) => `
+                                <div class="flex items-center justify-between p-3 bg-orange-50 rounded-xl hover:bg-orange-100 transition-colors">
+                                    <div class="flex items-center gap-3">
+                                        <div class="px-3 py-1 rounded-lg border font-medium ${utils.getEstadoColor(estado)}">
+                                            ${estado}
+                                        </div>
+                                    </div>
+                                    <div class="text-orange-900 font-semibold">
+                                        ${cantidad} pedido${cantidad !== 1 ? 's' : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            },
+
+            renderProductosMasVendidos() {
+                const { productosMasVendidos } = appState.dashboardData;
+                
+                return `
+                    <div class="bg-white rounded-2xl p-6 shadow-lg border border-orange-100">
+                        <h3 class="text-orange-900 mb-4 flex items-center gap-2 text-lg font-semibold">
+                            <i class="fas fa-chart-line text-orange-500"></i>
+                            Productos Más Vendidos
+                        </h3>
+                        <div class="space-y-3">
+                            ${productosMasVendidos.length > 0 ? 
+                                productosMasVendidos.map((producto, index) => `
+                                    <div class="flex items-center justify-between p-3 bg-gradient-to-r from-orange-50 to-yellow-50 rounded-xl hover:from-orange-100 hover:to-yellow-100 transition-all">
+                                        <div class="flex items-center gap-3">
+                                            <div class="bg-gradient-to-br from-orange-500 to-yellow-500 text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold">
+                                                ${index + 1}
+                                            </div>
+                                            <div>
+                                                <p class="text-orange-900 font-medium">${producto.nombre}</p>
+                                                <p class="text-sm text-orange-600">${producto.categoria}</p>
+                                            </div>
+                                        </div>
+                                        <div class="text-orange-900 font-bold">
+                                            ${producto.total_vendido} vendidos
+                                        </div>
+                                    </div>
+                                `).join('') :
+                                '<div class="text-center py-8 text-orange-600">No hay datos de productos vendidos</div>'
+                            }
+                        </div>
+                    </div>
+                `;
+            },
+
+            renderVentasRecientes() {
+                const { ventasRecientes } = appState.dashboardData;
+                
+                return `
+                    <div class="bg-white rounded-2xl p-6 shadow-lg border border-orange-100">
+                        <h3 class="text-orange-900 mb-4 flex items-center gap-2 text-lg font-semibold">
+                            <i class="fas fa-clock text-orange-500"></i>
+                            Ventas Recientes
+                        </h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            ${ventasRecientes.length > 0 ?
+                                ventasRecientes.map(factura => `
+                                    <div class="p-4 bg-gradient-to-br from-orange-50 to-yellow-50 rounded-xl border border-orange-100 hover:shadow-md transition-all cursor-pointer">
+                                        <div class="flex items-start justify-between mb-2">
+                                            <div>
+                                                <p class="text-orange-900 font-semibold">Pedido #${factura.id}</p>
+                                                <p class="text-sm text-orange-600">${factura.nombre_cliente || 'Cliente no encontrado'}</p>
+                                            </div>
+                                            <div class="px-2 py-1 rounded-lg text-xs border font-medium ${utils.getEstadoColor(factura.estado)}">
+                                                ${factura.estado}
+                                            </div>
+                                        </div>
+                                        <div class="text-sm text-orange-700 mb-2">
+                                            ${factura.items?.length || 0} item${(factura.items?.length || 0) !== 1 ? 's' : ''}
+                                        </div>
+                                        <div class="flex items-center justify-between pt-2 border-t border-orange-200">
+                                            <p class="text-xs text-orange-600">${utils.formatDate(factura.fecha)}</p>
+                                            <p class="text-orange-900 font-bold">${utils.formatCurrency(factura.precio_total)}</p>
+                                        </div>
+                                    </div>
+                                `).join('') :
+                                '<div class="col-span-3 text-center py-8 text-orange-600">No hay ventas recientes</div>'
+                            }
+                        </div>
+                    </div>
+                `;
+            },
+
+            // Vista de Pedidos
+            renderOrdersView() {
+                return `
+                    <div class="space-y-6 fade-in">
+                        ${this.renderOrdersFilters()}
+                        ${this.renderOrdersList()}
+                    </div>
+                `;
+            },
+
+            renderOrdersFilters() {
+                return `
+                    <div class="bg-white rounded-2xl p-6 shadow-lg border border-orange-100">
+                        <div class="flex flex-col md:flex-row gap-4 items-center">
+                            <div class="flex-1 relative w-full">
+                                <i class="fas fa-search absolute left-4 top-1/2 transform -translate-y-1/2 text-orange-400"></i>
+                                <input type="text" 
+                                       placeholder="Buscar por ID, cliente o descripción..." 
+                                       class="w-full pl-12 pr-4 py-3 border-2 border-orange-200 rounded-xl focus:outline-none focus:border-orange-400 transition-colors"
+                                       onkeyup="app.handleSearch(event)">
+                            </div>
+                            <div class="flex items-center gap-2 flex-wrap justify-center">
+                                <i class="fas fa-filter text-orange-500"></i>
+                                ${['Todos', 'Pedido', 'Pagado', 'En envio', 'Enviado'].map(estado => `
+                                    <button onclick="app.filterOrders('${estado}')"
+                                            class="px-4 py-2 rounded-xl transition-all font-medium ${appState.currentFilter === estado ? 'bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'}">
+                                        ${estado}
+                                    </button>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            },
+
+            renderOrdersList() {
+                const { pedidos } = appState;
+
+                if (pedidos.length === 0) {
+                    return `
+                        <div class="bg-white rounded-2xl p-12 text-center shadow-lg border border-orange-100">
+                            <i class="fas fa-box text-orange-300 text-6xl mb-4"></i>
+                            <p class="text-orange-600 text-lg">No se encontraron pedidos</p>
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div class="space-y-4">
+                        ${pedidos.map(pedido => this.renderOrderCard(pedido)).join('')}
+                    </div>
+                `;
+            },
+
+            renderOrderCard(pedido) {
+                return `
+                    <div class="bg-white rounded-2xl shadow-lg border border-orange-100 overflow-hidden hover:shadow-xl transition-all">
+                        <div class="p-6 cursor-pointer hover:bg-orange-50 transition-colors" onclick="app.toggleOrderDetails(${pedido.id})">
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="flex items-center gap-4">
+                                    <div class="p-4 rounded-2xl text-white shadow-lg ${this.getOrderGradient(pedido.estado)}">
+                                        <i class="fas fa-box text-white text-lg"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="text-orange-900 text-xl font-bold">Pedido #${pedido.id}</h3>
+                                        <p class="text-orange-600 text-sm">${utils.formatDate(pedido.fecha)}</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-4">
+                                    <div class="px-4 py-2 rounded-xl border-2 font-semibold ${utils.getEstadoColor(pedido.estado)}">
+                                        ${pedido.estado}
+                                    </div>
+                                    <i class="fas fa-chevron-down text-orange-400 text-lg"></i>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                ${this.renderOrderInfo('Cliente', pedido.nombre_cliente, 'fas fa-user', 'blue')}
+                                ${this.renderOrderInfo('Dirección', pedido.direccion, 'fas fa-map-marker-alt', 'purple')}
+                                ${this.renderOrderInfo('Teléfono', pedido.numero, 'fas fa-phone', 'green', utils.formatCurrency(pedido.precio_total))}
+                            </div>
+
+                            ${pedido.descripcion ? `
+                                <div class="mt-4 p-4 bg-orange-50 rounded-xl">
+                                    <p class="text-sm text-orange-600 mb-1">Descripción</p>
+                                    <p class="text-orange-900">${pedido.descripcion}</p>
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <div id="order-details-${pedido.id}" class="hidden border-t border-orange-100 bg-gradient-to-br from-orange-50 to-yellow-50 p-6">
+                            <h4 class="text-orange-900 text-lg font-bold mb-4">Detalles del Pedido</h4>
+                            <div class="space-y-3">
+                                ${pedido.items ? pedido.items.map(item => this.renderOrderItem(item)).join('') : ''}
+                            </div>
+
+                            <div class="mt-6 pt-4 border-t border-orange-200">
+                                <div class="flex items-center justify-between p-4 bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl text-white">
+                                    <span class="text-lg font-bold">Total del Pedido</span>
+                                    <span class="text-2xl font-bold">${utils.formatCurrency(pedido.precio_total)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            },
+
+            renderOrderInfo(title, value, icon, color, extra = '') {
+                const colorClasses = {
+                    blue: 'from-blue-50 to-indigo-50 text-blue-600 text-blue-900',
+                    purple: 'from-purple-50 to-pink-50 text-purple-600 text-purple-900',
+                    green: 'from-green-50 to-emerald-50 text-green-600 text-green-900'
+                };
+
+                return `
+                    <div class="flex items-start gap-3 p-4 bg-gradient-to-br ${colorClasses[color]} rounded-xl">
+                        <div class="bg-${color}-500 p-2 rounded-lg text-white">
+                            <i class="${icon}"></i>
+                        </div>
+                        <div class="flex-1 ${extra ? '' : 'min-w-0'}">
+                            <p class="text-sm mb-1">${title}</p>
+                            <p class="font-medium truncate">${value || 'N/A'}</p>
+                            ${extra ? `<p class="font-bold mt-2">${extra}</p>` : ''}
+                        </div>
+                    </div>
+                `;
+            },
+
+            renderOrderItem(item) {
+                return `
+                    <div class="flex items-center justify-between p-4 bg-white rounded-xl shadow-sm border border-orange-100">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-3">
+                                <div class="bg-gradient-to-br from-orange-500 to-yellow-500 text-white w-10 h-10 rounded-xl flex items-center justify-center font-bold">
+                                    ${item.cantidad}x
+                                </div>
+                                <div>
+                                    <p class="text-orange-900 font-medium">${item.producto_nombre}</p>
+                                    <p class="text-sm text-orange-600">${item.producto_descripcion || 'Sin descripción'}</p>
+                                    ${item.notas ? `<p class="text-sm text-orange-700 mt-1 italic">Nota: ${item.notas}</p>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-orange-900 font-bold">${utils.formatCurrency(item.precio_unitario * item.cantidad)}</p>
+                            <p class="text-sm text-orange-600">${utils.formatCurrency(item.precio_unitario)} c/u</p>
+                        </div>
+                    </div>
+                `;
+            },
+
+            getOrderGradient(estado) {
+                const gradients = {
+                    'Pedido': 'bg-gradient-to-br from-blue-500 to-indigo-600',
+                    'Pagado': 'bg-gradient-to-br from-green-500 to-emerald-600',
+                    'En envio': 'bg-gradient-to-br from-yellow-500 to-orange-600',
+                    'Enviado': 'bg-gradient-to-br from-purple-500 to-pink-600'
+                };
+                return gradients[estado] || 'bg-gradient-to-br from-gray-500 to-gray-600';
+            }
+        };
+
+        // Aplicación principal
+        const app = {
+            async init() {
+                try {
+                    utils.showLoading();
+                    await this.loadDashboardData();
+                    this.render();
+                    utils.hideLoading();
+                } catch (error) {
+                    console.error('Error inicializando la aplicación:', error);
+                    document.getElementById('content').innerHTML = `
+                        <div class="text-center py-12">
+                            <i class="fas fa-exclamation-triangle text-orange-500 text-6xl mb-4"></i>
+                            <h2 class="text-orange-900 text-2xl font-bold mb-2">Error al cargar la aplicación</h2>
+                            <p class="text-orange-600">Por favor, verifica que el servidor esté funcionando.</p>
+                            <button onclick="app.init()" class="mt-4 px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors">
+                                Reintentar
+                            </button>
+                        </div>
+                    `;
+                    utils.hideLoading();
+                }
+            },
+
+            async loadDashboardData() {
+                appState.dashboardData = await apiService.getDashboardStats();
+            },
+
+            async loadPedidos(estado = 'Todos') {
+                appState.pedidos = await apiService.getPedidos(estado);
+            },
+
+            render() {
+                components.renderNavButtons();
+                
+                const content = document.getElementById('content');
+                if (appState.currentView === 'dashboard') {
+                    content.innerHTML = components.renderDashboard();
+                } else {
+                    content.innerHTML = components.renderOrdersView();
+                }
+            },
+
+            async changeView(view) {
+                appState.currentView = view;
+                utils.showLoading();
+
+                try {
+                    if (view === 'orders') {
+                        await this.loadPedidos();
+                    }
+                    this.render();
+                } catch (error) {
+                    console.error('Error cambiando vista:', error);
+                } finally {
+                    utils.hideLoading();
+                }
+            },
+
+            async filterOrders(estado) {
+                appState.currentFilter = estado;
+                utils.showLoading();
+                await this.loadPedidos(estado);
+                this.render();
+                utils.hideLoading();
+            },
+
+            handleSearch(event) {
+                const searchTerm = event.target.value.toLowerCase();
+                // Implementar búsqueda si es necesario
+                console.log('Buscando:', searchTerm);
+            },
+
+            toggleOrderDetails(orderId) {
+                const detailsElement = document.getElementById(`order-details-${orderId}`);
+                if (detailsElement) {
+                    detailsElement.classList.toggle('hidden');
+                }
+            }
+        };
+
+        // Inicializar la aplicación cuando se carga la página
+        document.addEventListener('DOMContentLoaded', () => {
+            app.init();
+        });
+    </script>
+</body>
+</html>
