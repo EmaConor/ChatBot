@@ -12,13 +12,14 @@ import pytz
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
-TOKEN = "EAApdsnrt0rUBP4eO8SdYVeiZB2QrJLDuxdwSA0IZBJECWTaZCN3ClZAbWd6LBWr1Hzgd5A4QZBX2k19w1CucuL8Gz5afchNyrpLIfFS7NUEmxgBttEXWQqW6QSmlYHEJA4GFbZBBot5b04GWZCkpcgcN4s59Pa5AeDlbzs5ZBpFE1JopuqwCD91ameSKOMUUVovjd3wAJ5ZCruhrZBNfSuZC75MR7BgQKASsCwL8U6usJA3ZCVEboSfYnVFgxEk9ytRpwBc4m3kovvrE4oQJSZCOvc1ei"
+TOKEN = "EAApdsnrt0rUBP1c5kBOypnVWYuBzqTR1vbhCDXQIjDb2FPQozaNYRZCWplFzhENCnS6u83ZAq7AyQSt8WUtQHKHMrvQKJZBtcQnnoRdY6leOzWbzmHbH0yg94RWvf6Vu716oscZAIwKkoVt6MEF6DaNXLSSZCupWRD1tQjiZBRCosTTiVTUKJjLlZCwTvh0TOl5d5pGFtoUZCiaI5ZCYtAyJ9ReZAbw4KQZCIlKsGw01KLraSy6dq6HMS6yNK9wWFVgYfTdOp5KY3Nm2GPyWm8bsDhp"
 PHONE_NUMBER_ID = "863285753529334"
 
 # === BASE DE DATOS TEMPORAL ===
 USUARIOS = {}
 LOGIN_ATTEMPTS = {}
 SESIONES_ACTIVAS = {}
+CARRITOS = {}  # {telefono: [{"producto_id": id, "nombre": nombre, "precio": precio, "cantidad": cantidad}]}
 
 # === RUTAS BÁSICAS ===
 @app.route('/')
@@ -52,6 +53,8 @@ def home():
                     <li>🎯 Navegación intuitiva con listas interactivas</li>
                     <li>🔐 Registro e inicio de sesión interactivo</li>
                     <li>⚙️ Gestión de sesiones con menús dinámicos</li>
+                    <li>🛒 Sistema de carrito de compras</li>
+                    <li>📦 Gestión de pedidos integrada</li>
                 </ul>
             </div>
         </div>
@@ -68,7 +71,8 @@ def status():
         "statistics": {
             "users_in_registration": len(USUARIOS),
             "active_sessions": len(SESIONES_ACTIVAS),
-            "login_attempts_tracking": len(LOGIN_ATTEMPTS)
+            "login_attempts_tracking": len(LOGIN_ATTEMPTS),
+            "active_carts": len(CARRITOS)
         }
     })
 
@@ -165,6 +169,76 @@ def iniciar_sesion(tel, cedula):
         print(f"🔴 Error en inicio de sesión: {e}")
         return False, "❌ Error del sistema. Intenta más tarde.", None
 
+# === FUNCIONES PARA EL CARRITO ===
+def agregar_al_carrito(telefono, producto_id, cantidad=1):
+    """Agrega un producto al carrito del usuario"""
+    try:
+        producto = DBP.buscar_producto_por_id(producto_id)
+        if not producto:
+            return False, "Producto no encontrado"
+        
+        if telefono not in CARRITOS:
+            CARRITOS[telefono] = []
+        
+        # Verificar si el producto ya está en el carrito
+        for item in CARRITOS[telefono]:
+            if item["producto_id"] == producto_id:
+                item["cantidad"] += cantidad
+                return True, f"✅ Cantidad actualizada: {producto['nombre']} x{item['cantidad']}"
+        
+        # Agregar nuevo producto al carrito
+        CARRITOS[telefono].append({
+            "producto_id": producto_id,
+            "nombre": producto["nombre"],
+            "precio": producto["precio"],
+            "cantidad": cantidad
+        })
+        
+        return True, f"✅ {producto['nombre']} agregado al carrito"
+        
+    except Exception as e:
+        print(f"🔴 Error agregando al carrito: {e}")
+        return False, "Error al agregar al carrito"
+
+def obtener_carrito(telefono):
+    """Obtiene el carrito del usuario"""
+    return CARRITOS.get(telefono, [])
+
+def calcular_total_carrito(telefono):
+    """Calcula el total del carrito"""
+    carrito = obtener_carrito(telefono)
+    total = 0
+    for item in carrito:
+        total += item["precio"] * item["cantidad"]
+    return total
+
+def eliminar_del_carrito(telefono, producto_id):
+    """Elimina un producto del carrito"""
+    if telefono in CARRITOS:
+        CARRITOS[telefono] = [item for item in CARRITOS[telefono] if item["producto_id"] != producto_id]
+        return True
+    return False
+
+def actualizar_cantidad_carrito(telefono, producto_id, nueva_cantidad):
+    """Actualiza la cantidad de un producto en el carrito"""
+    if telefono in CARRITOS:
+        for item in CARRITOS[telefono]:
+            if item["producto_id"] == producto_id:
+                if nueva_cantidad <= 0:
+                    eliminar_del_carrito(telefono, producto_id)
+                    return True, "Producto eliminado del carrito"
+                else:
+                    item["cantidad"] = nueva_cantidad
+                    return True, f"✅ Cantidad actualizada a {nueva_cantidad}"
+    return False, "Producto no encontrado en el carrito"
+
+def vaciar_carrito(telefono):
+    """Vacía todo el carrito"""
+    if telefono in CARRITOS:
+        CARRITOS[telefono] = []
+        return True
+    return False
+
 # === FUNCIONES PARA MENÚS INTERACTIVOS ===
 def enviar_mensaje(numero, texto):
     """Envía mensaje de texto simple"""
@@ -244,6 +318,9 @@ def enviar_menu_principal(numero):
         enviar_menu_logueado(numero, nombre)
         return True
     
+    carrito = obtener_carrito(numero)
+    items_carrito = len(carrito) if carrito else 0
+    
     secciones = [
         {
             "title": "🔐 Acceso",
@@ -272,6 +349,11 @@ def enviar_menu_principal(numero):
                     "id": "informacion",
                     "title": "Información",
                     "description": "Sobre nosotros"
+                },
+                {
+                    "id": "ver_carrito",
+                    "title": f"🛒 Carrito ({items_carrito})",
+                    "description": f"Ver tus productos ({items_carrito} items)"
                 }
             ]
         }
@@ -287,6 +369,8 @@ def enviar_menu_principal(numero):
 def enviar_menu_logueado(numero, nombre_usuario=None):
     """Menú para usuarios con sesión activa"""
     saludo = f"👋 Hola {nombre_usuario}" if nombre_usuario else "👋 Hola"
+    carrito = obtener_carrito(numero)
+    items_carrito = len(carrito) if carrito else 0
     
     secciones = [
         {
@@ -301,6 +385,11 @@ def enviar_menu_logueado(numero, nombre_usuario=None):
                     "id": "informacion",
                     "title": "Información",
                     "description": "Sobre nosotros"
+                },
+                {
+                    "id": "ver_carrito",
+                    "title": f"🛒 Carrito ({items_carrito})",
+                    "description": f"Ver tus productos ({items_carrito} items)"
                 }
             ]
         },
@@ -375,6 +464,125 @@ def enviar_menu_actualizacion(numero):
         secciones
     )
 
+def enviar_menu_carrito(numero):
+    """Envía el menú del carrito con opciones"""
+    carrito = obtener_carrito(numero)
+    total = calcular_total_carrito(numero)
+    
+    if not carrito:
+        mensaje = "🛒 *Tu Carrito está vacío*\n\nNo hay productos en tu carrito."
+        enviar_mensaje(numero, mensaje)
+        time.sleep(1)
+        enviar_menu_productos(numero)
+        return False
+    
+    # Construir resumen del carrito
+    resumen = "🛒 *Tu Carrito de Compras*\n\n"
+    for i, item in enumerate(carrito, 1):
+        subtotal = item["precio"] * item["cantidad"]
+        resumen += f"{i}. {item['nombre']}\n"
+        resumen += f"   Cantidad: {item['cantidad']} x ${item['precio']:,} = ${subtotal:,}\n\n"
+    
+    resumen += f"💰 *Total: ${total:,}*"
+    
+    # Enviar resumen primero
+    enviar_mensaje(numero, resumen)
+    time.sleep(1)
+    
+    # Menú de opciones del carrito
+    secciones = [
+        {
+            "title": "📋 Opciones del Carrito",
+            "rows": [
+                {
+                    "id": "confirmar_pedido",
+                    "title": "✅ Confirmar Pedido",
+                    "description": "Finalizar y enviar tu pedido"
+                },
+                {
+                    "id": "agregar_producto",
+                    "title": "➕ Agregar Producto",
+                    "description": "Seguir agregando productos"
+                },
+                {
+                    "id": "editar_carrito",
+                    "title": "✏️ Editar Carrito",
+                    "description": "Modificar cantidades o eliminar"
+                }
+            ]
+        },
+        {
+            "title": "📝 Información Adicional",
+            "rows": [
+                {
+                    "id": "agregar_descripcion",
+                    "title": "📄 Agregar Descripción",
+                    "description": "Añadir notas al pedido"
+                },
+                {
+                    "id": "volver_menu_principal",
+                    "title": "🔙 Menú Principal",
+                    "description": "Volver al menú principal"
+                }
+            ]
+        }
+    ]
+    
+    return enviar_menu_interactivo(
+        numero,
+        "🛒 Gestionar Carrito",
+        "Selecciona una opción para gestionar tu carrito:",
+        secciones
+    )
+
+def enviar_menu_edicion_carrito(numero):
+    """Envía menú para editar productos del carrito"""
+    carrito = obtener_carrito(numero)
+    
+    if not carrito:
+        enviar_mensaje(numero, "❌ Tu carrito está vacío")
+        enviar_menu_carrito(numero)
+        return False
+    
+    secciones = []
+    
+    # Sección para cada producto en el carrito
+    for i, item in enumerate(carrito, 1):
+        secciones.append({
+            "title": f"📦 {item['nombre']}",
+            "rows": [
+                {
+                    "id": f"editar_cantidad_{item['producto_id']}",
+                    "title": f"✏️ Cambiar Cantidad ({item['cantidad']})",
+                    "description": f"Actualizar cantidad de {item['nombre']}"
+                },
+                {
+                    "id": f"eliminar_producto_{item['producto_id']}",
+                    "title": "🗑️ Eliminar Producto",
+                    "description": f"Quitar {item['nombre']} del carrito"
+                }
+            ]
+        })
+    
+    # Sección de navegación
+    secciones.append({
+        "title": "🔙 Navegación",
+        "rows": [
+            {
+                "id": "volver_carrito",
+                "title": "Volver al Carrito",
+                "description": "Regresar al menú del carrito"
+            }
+        ]
+    })
+    
+    return enviar_menu_interactivo(
+        numero,
+        "✏️ Editar Carrito",
+        "Selecciona qué producto deseas modificar:",
+        secciones
+    )
+
 def enviar_menu_productos(numero):
     """Menú de productos disponibles desde la base de datos"""
     try:
@@ -418,6 +626,11 @@ def enviar_menu_productos(numero):
                     "id": "volver_menu",
                     "title": "Volver al Menú",
                     "description": "Regresar al menú principal"
+                },
+                {
+                    "id": "ver_carrito",
+                    "title": "🛒 Ver Carrito",
+                    "description": "Ver productos en tu carrito"
                 }
             ]
         })
@@ -425,7 +638,7 @@ def enviar_menu_productos(numero):
         return enviar_menu_interactivo(
             numero,
             "🍽️ Ver Productos",
-            "📋 *Menú Disponible - Mezón Peruano* 🇵🇪\n\nSelecciona un producto para más información:",
+            "📋 *Menú Disponible - Mezón Peruano* 🇵🇪\n\nSelecciona un producto para agregarlo al carrito:",
             secciones
         )
         
@@ -512,9 +725,13 @@ def enviar_detalle_producto(numero, producto_id):
         else:
             mensaje += "❌ *No disponible*\n\n"
         
-        mensaje += "¡Próximamente podrás hacer pedidos! 🚀"
+        mensaje += "¡Este producto ha sido agregado a tu carrito! 🛒"
         
         enviar_mensaje(numero, mensaje)
+        
+        # Agregar automáticamente al carrito
+        success, mensaje_carrito = agregar_al_carrito(numero, id_num)
+        enviar_mensaje(numero, mensaje_carrito)
         
         time.sleep(1)
         enviar_menu_productos(numero)
@@ -565,7 +782,7 @@ def webhook_whatsapp():
             enviar_mensaje_fuera_horario(telefono)
             return jsonify({"status": "fuera de horario"}), 200
         
-        # === PRIMERO: Manejo de etapas activas (actualización, registro, login) ===
+        # === PRIMERO: Manejo de etapas activas (actualización, registro, login, carrito) ===
         if telefono in USUARIOS:
             etapa = USUARIOS[telefono].get("etapa")
             print(f"🔍 Usuario {telefono} en etapa: {etapa}")
@@ -789,6 +1006,21 @@ def webhook_whatsapp():
                 
                 return jsonify({"status": "registro completo"}), 200
 
+            # === PROCESO DE EDICIÓN DE CARRITO ===
+            elif etapa == "editando_cantidad":
+                print("🔧 Procesando edición de cantidad...")
+                try:
+                    nueva_cantidad = int(mensaje)
+                    producto_id = USUARIOS[telefono]["producto_id"]
+                    success, mensaje_respuesta = actualizar_cantidad_carrito(telefono, producto_id, nueva_cantidad)
+                    enviar_mensaje(telefono, mensaje_respuesta)
+                    del USUARIOS[telefono]
+                    time.sleep(1)
+                    enviar_menu_carrito(telefono)
+                except ValueError:
+                    enviar_mensaje(telefono, "❌ Por favor ingresa un número válido para la cantidad:")
+                return jsonify({"status": "cantidad actualizada"}), 200
+
         # === SEGUNDO: Manejo de usuarios logueados ===
         if telefono in SESIONES_ACTIVAS:
             print(f"🔐 Usuario {telefono} tiene sesión activa")
@@ -919,11 +1151,36 @@ def webhook_whatsapp():
             enviar_menu_principal(telefono)
             return jsonify({"status": "info"}), 200
 
-        # === OPCIONES DE PRODUCTOS ===
+        # === OPCIONES DEL CARRITO ===
+        elif mensaje == "ver_carrito":
+            enviar_menu_carrito(telefono)
+            return jsonify({"status": "ver carrito"}), 200
+
         elif mensaje.startswith("producto_"):
+            # Mostrar detalles del producto y agregar al carrito automáticamente
             enviar_detalle_producto(telefono, mensaje)
-            return jsonify({"status": "detalle producto"}), 200
+            return jsonify({"status": "producto agregado"}), 200
         
+        elif mensaje == "agregar_producto":
+            enviar_menu_productos(telefono)
+            return jsonify({"status": "agregar producto"}), 200
+
+        elif mensaje == "editar_carrito":
+            enviar_menu_edicion_carrito(telefono)
+            return jsonify({"status": "editar carrito"}), 200
+
+        elif mensaje == "volver_carrito":
+            enviar_menu_carrito(telefono)
+            return jsonify({"status": "volver carrito"}), 200
+
+        elif mensaje == "volver_menu_principal":
+            if telefono in SESIONES_ACTIVAS:
+                nombre = SESIONES_ACTIVAS[telefono].get("nombre")
+                enviar_menu_logueado(telefono, nombre)
+            else:
+                enviar_menu_principal(telefono)
+            return jsonify({"status": "volver menu principal"}), 200
+
         elif mensaje == "volver_menu":
             if telefono in SESIONES_ACTIVAS:
                 nombre = SESIONES_ACTIVAS[telefono].get("nombre")
@@ -931,6 +1188,69 @@ def webhook_whatsapp():
             else:
                 enviar_menu_principal(telefono)
             return jsonify({"status": "volver menu"}), 200
+
+        # Manejar edición de cantidades
+        elif mensaje.startswith("editar_cantidad_"):
+            producto_id = int(mensaje.replace("editar_cantidad_", ""))
+            # Guardar en USUARIOS que estamos editando la cantidad
+            USUARIOS[telefono] = {
+                "etapa": "editando_cantidad",
+                "producto_id": producto_id
+            }
+            enviar_mensaje(telefono, "✏️ Ingresa la nueva cantidad para este producto:")
+            return jsonify({"status": "editando cantidad"}), 200
+
+        elif mensaje.startswith("eliminar_producto_"):
+            producto_id = int(mensaje.replace("eliminar_producto_", ""))
+            eliminar_del_carrito(telefono, producto_id)
+            enviar_mensaje(telefono, "✅ Producto eliminado del carrito")
+            time.sleep(1)
+            enviar_menu_carrito(telefono)
+            return jsonify({"status": "producto eliminado"}), 200
+
+        elif mensaje == "confirmar_pedido":
+            if telefono not in SESIONES_ACTIVAS:
+                enviar_mensaje(telefono, "❌ Debes iniciar sesión para confirmar el pedido")
+                enviar_menu_principal(telefono)
+                return jsonify({"status": "login requerido"}), 200
+            
+            carrito = obtener_carrito(telefono)
+            if not carrito:
+                enviar_mensaje(telefono, "❌ Tu carrito está vacío")
+                enviar_menu_carrito(telefono)
+                return jsonify({"status": "carrito vacio"}), 200
+            
+            # Aquí iría la lógica para guardar en tu base de datos
+            # Por ahora solo un mensaje de confirmación
+            total = calcular_total_carrito(telefono)
+            mensaje_confirmacion = f"""✅ *Pedido Confirmado* 🎉
+
+🛒 *Resumen de tu pedido:*
+"""
+            for item in carrito:
+                subtotal = item["precio"] * item["cantidad"]
+                mensaje_confirmacion += f"• {item['nombre']} x{item['cantidad']} = ${subtotal:,}\n"
+            
+            mensaje_confirmacion += f"\n💰 *Total: ${total:,}*"
+            mensaje_confirmacion += "\n\n📞 Nos contactaremos contigo pronto para coordinar la entrega."
+            
+            enviar_mensaje(telefono, mensaje_confirmacion)
+            
+            # Vaciar carrito después de confirmar
+            vaciar_carrito(telefono)
+            
+            time.sleep(2)
+            if telefono in SESIONES_ACTIVAS:
+                nombre = SESIONES_ACTIVAS[telefono].get("nombre")
+                enviar_menu_logueado(telefono, nombre)
+            
+            return jsonify({"status": "pedido confirmado"}), 200
+
+        elif mensaje == "agregar_descripcion":
+            enviar_mensaje(telefono, "📝 *Agregar Descripción al Pedido*\n\nEsta funcionalidad estará disponible próximamente.")
+            time.sleep(1)
+            enviar_menu_carrito(telefono)
+            return jsonify({"status": "descripcion"}), 200
 
         # === MENSAJE DE BIENVENIDA ===
         if mensaje in ["hola", "hi", "hello", "menú", "menu", "opciones", "inicio"]:
@@ -955,4 +1275,5 @@ if __name__ == "__main__":
     print("🚀 Iniciando servidor Flask con menús interactivos...")
     print("📍 Webhook: /webhook/")
     print("✨ Menús interactivos habilitados (Select Box)")
+    print("🛒 Sistema de carrito de compras activado")
     app.run(debug=True, host="0.0.0.0", port=5000)
