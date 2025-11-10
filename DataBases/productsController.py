@@ -219,7 +219,7 @@ def cargar_menu_inicial():
     print("✅ Menú inicial cargado correctamente.")
 
 # === FUNCIÓN PARA OBTENER PRODUCTOS POR CATEGORÍA ===
-def obtener_por_categoria(categoria: str):
+def obtener_productos_por_categoria(categoria: str):
     """
     Obtiene todos los productos de una categoría específica.
     """
@@ -228,7 +228,7 @@ def obtener_por_categoria(categoria: str):
     
     cursor.execute('''
         SELECT id, nombre, descripcion, precio, categoria, disponible 
-        FROM productos WHERE categoria = ?
+        FROM productos WHERE categoria = ? AND disponible = 1
     ''', (categoria,))
     
     resultados = cursor.fetchall()
@@ -247,6 +247,7 @@ def obtener_por_categoria(categoria: str):
         }
         productos.append(producto)
     
+    print(f"📂 Productos encontrados en categoría '{categoria}': {len(productos)}")
     return productos
 
 # === FUNCIÓN PARA OBTENER PRODUCTOS DISPONIBLES ===

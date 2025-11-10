@@ -12,7 +12,7 @@ import pytz
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
-TOKEN = "EAApdsnrt0rUBP1c5kBOypnVWYuBzqTR1vbhCDXQIjDb2FPQozaNYRZCWplFzhENCnS6u83ZAq7AyQSt8WUtQHKHMrvQKJZBtcQnnoRdY6leOzWbzmHbH0yg94RWvf6Vu716oscZAIwKkoVt6MEF6DaNXLSSZCupWRD1tQjiZBRCosTTiVTUKJjLlZCwTvh0TOl5d5pGFtoUZCiaI5ZCYtAyJ9ReZAbw4KQZCIlKsGw01KLraSy6dq6HMS6yNK9wWFVgYfTdOp5KY3Nm2GPyWm8bsDhp"
+TOKEN = "EAApdsnrt0rUBP18fgeMk4e3u56w9UvVb9ZAiPDvRUoeHK9nzBsFxgfU43rV0Am5eA0PYKeNxUTsyn0UZAx9JjABhG8LS4VdAjx2hTU6iK5u1FjUjrYRhshBQOEoMcnEm9h3TQ8YvYINaab1Yq8D8Tqj0Rnoncnf1MMq4UX3VhlMjSJ9NMXT86VxKj92srYhiLpsOZBefH9wfcmH0RPUEQs57PfBmWygpMlisCgPk2tpJrvPEuHmzHwtuZCiUfwPPfel2ymhdzAVVnWz5MOmZC"
 PHONE_NUMBER_ID = "863285753529334"
 
 # === BASE DE DATOS TEMPORAL ===
@@ -175,7 +175,7 @@ def agregar_al_carrito(telefono, producto_id, cantidad=1):
     try:
         producto = DBP.buscar_producto_por_id(producto_id)
         if not producto:
-            return False, "Producto no encontrado"
+            return False, "❌ Producto no encontrado"
         
         if telefono not in CARRITOS:
             CARRITOS[telefono] = []
@@ -198,7 +198,7 @@ def agregar_al_carrito(telefono, producto_id, cantidad=1):
         
     except Exception as e:
         print(f"🔴 Error agregando al carrito: {e}")
-        return False, "Error al agregar al carrito"
+        return False, "❌ Error al agregar al carrito"
 
 def obtener_carrito(telefono):
     """Obtiene el carrito del usuario"""
@@ -268,6 +268,33 @@ def enviar_mensaje(numero, texto):
 def enviar_menu_interactivo(numero, titulo_boton, texto_cuerpo, secciones):
     """Envía un menú interactivo con lista de opciones"""
     try:
+        # Verificar que no excedamos el límite de 10 filas en total
+        total_rows = 0
+        for seccion in secciones:
+            total_rows += len(seccion.get('rows', []))
+        
+        if total_rows > 10:
+            print(f"⚠️ Advertencia: Demasiadas filas ({total_rows}), limitando a 10")
+            # Limitar a 10 filas máximo
+            secciones_limited = []
+            rows_count = 0
+            for seccion in secciones:
+                if rows_count >= 10:
+                    break
+                limited_rows = []
+                for row in seccion.get('rows', []):
+                    if rows_count < 10:
+                        limited_rows.append(row)
+                        rows_count += 1
+                    else:
+                        break
+                if limited_rows:
+                    secciones_limited.append({
+                        'title': seccion['title'],
+                        'rows': limited_rows
+                    })
+            secciones = secciones_limited
+        
         url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
         headers = {
             "Authorization": f"Bearer {TOKEN}",
@@ -473,7 +500,7 @@ def enviar_menu_carrito(numero):
         mensaje = "🛒 *Tu Carrito está vacío*\n\nNo hay productos en tu carrito."
         enviar_mensaje(numero, mensaje)
         time.sleep(1)
-        enviar_menu_productos(numero)
+        enviar_menu_categorias(numero)
         return False
     
     # Construir resumen del carrito
@@ -544,22 +571,30 @@ def enviar_menu_edicion_carrito(numero):
         enviar_menu_carrito(numero)
         return False
     
+    # Si hay muchos productos, dividir en múltiples menús
+    if len(carrito) > 4:
+        enviar_mensaje(numero, f"📦 Tienes {len(carrito)} productos en tu carrito.")
+        enviar_mensaje(numero, "Para editar productos individuales, por favor elimina algunos primero o confirma tu pedido actual.")
+        time.sleep(1)
+        enviar_menu_carrito(numero)
+        return False
+    
     secciones = []
     
-    # Sección para cada producto en el carrito
-    for i, item in enumerate(carrito, 1):
+    # Sección para cada producto en el carrito (máximo 4 productos)
+    for i, item in enumerate(carrito[:4], 1):
         secciones.append({
-            "title": f"📦 {item['nombre']}",
+            "title": f"📦 {item['nombre'][:20]}...",
             "rows": [
                 {
                     "id": f"editar_cantidad_{item['producto_id']}",
-                    "title": f"✏️ Cambiar Cantidad ({item['cantidad']})",
-                    "description": f"Actualizar cantidad de {item['nombre']}"
+                    "title": f"✏️ Cantidad ({item['cantidad']})",
+                    "description": f"Cambiar cantidad"
                 },
                 {
                     "id": f"eliminar_producto_{item['producto_id']}",
-                    "title": "🗑️ Eliminar Producto",
-                    "description": f"Quitar {item['nombre']} del carrito"
+                    "title": "🗑️ Eliminar",
+                    "description": f"Quitar del carrito"
                 }
             ]
         })
@@ -583,49 +618,48 @@ def enviar_menu_edicion_carrito(numero):
         secciones
     )
 
-def enviar_menu_productos(numero):
-    """Menú de productos disponibles desde la base de datos"""
+def enviar_menu_categorias(numero):
+    """Envía un menú con categorías"""
     try:
         productos = DBP.listar_productos()
+        categorias_set = set()
         
-        if not productos:
-            enviar_mensaje(numero, "📭 No hay productos disponibles en este momento.")
-            enviar_menu_principal(numero)
-            return False
-        
-        categorias = {}
         for producto in productos:
             if producto.get("Disponible", 1) == 1:
-                categoria = producto.get("categoria", "Otros")
-                if categoria not in categorias:
-                    categorias[categoria] = []
-                
-                descripcion = f"${producto.get('precio', 0):,}"
-                if len(descripcion) > 70:
-                    descripcion = descripcion[:67] + "..."
-                
-                categorias[categoria].append({
-                    "id": f"producto_{producto.get('id', '')}",
-                    "title": producto.get("nombre", "Producto"),
-                    "description": descripcion
-                })
+                categorias_set.add(producto.get("categoria", "Otros"))
+        
+        categorias = list(categorias_set)
+        
+        if not categorias:
+            enviar_mensaje(numero, "📭 No hay categorías disponibles.")
+            return False
         
         secciones = []
+        rows_categorias = []
         
-        for categoria, productos_cat in categorias.items():
-            if productos_cat:
-                secciones.append({
-                    "title": f"🍽️ {categoria}",
-                    "rows": productos_cat
-                })
+        for categoria in categorias[:10]:
+            productos_cat = DBP.obtener_productos_por_categoria(categoria)
+            count = len(productos_cat)
+            
+            rows_categorias.append({
+                "id": f"categoria_{categoria}",
+                "title": f"📂 {categoria}",
+                "description": f"{count} producto{'s' if count != 1 else ''}"
+            })
         
+        secciones.append({
+            "title": "📂 Categorías Disponibles",
+            "rows": rows_categorias
+        })
+        
+        # Opciones de navegación
         secciones.append({
             "title": "🔙 Navegación",
             "rows": [
                 {
-                    "id": "volver_menu",
-                    "title": "Volver al Menú",
-                    "description": "Regresar al menú principal"
+                    "id": "volver_menu_principal",
+                    "title": "🏠 Menú Principal",
+                    "description": "Volver al menú principal"
                 },
                 {
                     "id": "ver_carrito",
@@ -637,21 +671,84 @@ def enviar_menu_productos(numero):
         
         return enviar_menu_interactivo(
             numero,
-            "🍽️ Ver Productos",
-            "📋 *Menú Disponible - Mezón Peruano* 🇵🇪\n\nSelecciona un producto para agregarlo al carrito:",
+            "🍽️ Ver Menú",
+            "📋 *Selecciona una categoría para ver sus productos:*",
             secciones
         )
         
     except Exception as e:
-        print(f"🔴 Error obteniendo productos: {e}")
-        enviar_mensaje(numero, "❌ Error al cargar el menú. Intenta más tarde.")
-        enviar_menu_principal(numero)
+        print(f"🔴 Error mostrando categorías: {e}")
+        enviar_mensaje(numero, "❌ Error al cargar categorías.")
+        return False
+
+def enviar_productos_categoria(numero, categoria):
+    """Envía un menú con los productos de una categoría específica"""
+    try:
+        productos = DBP.obtener_productos_por_categoria(categoria)
+        
+        if not productos:
+            enviar_mensaje(numero, f"📭 No hay productos disponibles en '{categoria}'.")
+            time.sleep(1)
+            enviar_menu_categorias(numero)
+            return False
+        
+        secciones = []
+        rows_productos = []
+        
+        for producto in productos[:10]:
+            precio_formateado = f"${producto.get('precio', 0):,}"
+            nombre = producto.get("nombre", "Producto")
+            if len(nombre) > 20:
+                nombre = nombre[:20] + "..."
+            
+            rows_productos.append({
+                "id": f"producto_{producto.get('id', '')}",
+                "title": nombre,
+                "description": precio_formateado
+            })
+        
+        secciones.append({
+            "title": f"🍽️ {categoria}",
+            "rows": rows_productos
+        })
+        
+        # Opciones de navegación
+        secciones.append({
+            "title": "🔙 Navegación",
+            "rows": [
+                {
+                    "id": "volver_categorias",
+                    "title": "📂 Volver a Categorías",
+                    "description": "Ver todas las categorías"
+                },
+                {
+                    "id": "volver_menu_principal",
+                    "title": "🏠 Menú Principal",
+                    "description": "Volver al menú principal"
+                },
+                {
+                    "id": "ver_carrito",
+                    "title": "🛒 Ver Carrito",
+                    "description": "Ver productos en tu carrito"
+                }
+            ]
+        })
+        
+        return enviar_menu_interactivo(
+            numero,
+            "🍽️ Seleccionar",
+            f"📋 *Productos de {categoria}*\n\nSelecciona un producto para agregarlo al carrito:",
+            secciones
+        )
+        
+    except Exception as e:
+        print(f"🔴 Error mostrando productos de {categoria}: {e}")
+        enviar_mensaje(numero, f"❌ Error al cargar productos de {categoria}.")
         return False
 
 def enviar_menu_pdf(numero):
     """Envía el menú en formato PDF al usuario"""
     try:
-        # URL del PDF del menú (debes reemplazar esto con tu URL real)
         url_pdf = "https://menu.emaconor.site/menu.pdf"
         
         url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
@@ -676,70 +773,20 @@ def enviar_menu_pdf(numero):
         if response.status_code == 200:
             print(f"→ PDF del menú enviado a {numero}")
             
-            # Mensaje adicional después del PDF
             time.sleep(1)
             mensaje_adicional = """📋 *¿Necesitas ayuda para elegir?*
 
-Conoce más detalles sobre algún plato o explora nuestras categorías en el menú interactivo.
-Selecciona una opción a continuación:"""
+Explora nuestras categorías en el menú interactivo."""
             enviar_mensaje(numero, mensaje_adicional)
             
             return True
         else:
             print(f"🔴 Error enviando PDF: {response.status_code} - {response.text}")
-            # Fallback: enviar menú interactivo si el PDF falla
-            enviar_mensaje(numero, "❌ No pude cargar el menú PDF. Te muestro nuestras opciones:")
+            enviar_mensaje(numero, "❌ No pude cargar el menú PDF. Te muestro nuestras categorías:")
             
     except Exception as e:
         print(f"🔴 Error enviando PDF del menú: {e}")
-        # Fallback a menú interactivo
-        enviar_mensaje(numero, "❌ Error al cargar el menú PDF. Te muestro nuestras opciones:")
-
-def enviar_detalle_producto(numero, producto_id):
-    """Envía los detalles de un producto específico"""
-    try:
-        if producto_id.startswith("producto_"):
-            id_num = producto_id.replace("producto_", "")
-            try:
-                id_num = int(id_num)
-            except ValueError:
-                enviar_mensaje(numero, "❌ Producto no encontrado.")
-                enviar_menu_productos(numero)
-                return
-        
-        producto = DBP.buscar_producto_por_id(id_num)
-        
-        if not producto:
-            enviar_mensaje(numero, "❌ Producto no encontrado.")
-            enviar_menu_productos(numero)
-            return
-        
-        mensaje = f"🍽️ *{producto.get('nombre', 'Producto')}*\n\n"
-        mensaje += f"📝 *Descripción:* {producto.get('descripcion', 'Sin descripción')}\n"
-        mensaje += f"💰 *Precio:* ${producto.get('precio', 0):,}\n"
-        mensaje += f"📂 *Categoría:* {producto.get('categoria', 'General')}\n"
-        
-        disponibilidad = producto.get("Disponible", 1)
-        if disponibilidad == 1:
-            mensaje += "✅ *Disponible*\n\n"
-        else:
-            mensaje += "❌ *No disponible*\n\n"
-        
-        mensaje += "¡Este producto ha sido agregado a tu carrito! 🛒"
-        
-        enviar_mensaje(numero, mensaje)
-        
-        # Agregar automáticamente al carrito
-        success, mensaje_carrito = agregar_al_carrito(numero, id_num)
-        enviar_mensaje(numero, mensaje_carrito)
-        
-        time.sleep(1)
-        enviar_menu_productos(numero)
-        
-    except Exception as e:
-        print(f"🔴 Error mostrando detalle producto: {e}")
-        enviar_mensaje(numero, "❌ Error al cargar información del producto.")
-        enviar_menu_productos(numero)
+        enviar_mensaje(numero, "❌ Error al cargar el menú PDF. Te muestro nuestras categorías:")
 
 # === WEBHOOK PRINCIPAL ===
 @app.route("/webhook/", methods=["POST", "GET"])
@@ -782,25 +829,19 @@ def webhook_whatsapp():
             enviar_mensaje_fuera_horario(telefono)
             return jsonify({"status": "fuera de horario"}), 200
         
-        # === PRIMERO: Manejo de etapas activas (actualización, registro, login, carrito) ===
+        # === PRIMERO: Manejo de etapas activas ===
         if telefono in USUARIOS:
             etapa = USUARIOS[telefono].get("etapa")
             print(f"🔍 Usuario {telefono} en etapa: {etapa}")
             
             # === PROCESO DE ACTUALIZACIÓN DE DATOS ===
             if etapa == "actualizando_nombre":
-                print("🔧 Procesando actualización de nombre...")
                 if len(mensaje) < 2:
                     enviar_mensaje(telefono, "❌ El nombre debe tener al menos 2 caracteres.\n\nIngresa un nombre válido:")
                     return jsonify({"status": "invalid name"}), 200
     
                 try:
-                    # Obtener cédula del usuario para verificación
                     cedula_actual = SESIONES_ACTIVAS[telefono].get("cedula")
-                    print(f"🔑 Verificando con cédula: {cedula_actual}")
-        
-                    # Actualizar en base de datos
-                    print(f"🔄 Actualizando nombre a: {mensaje.title()}")
                     success = BDC.actualizar_nombre_cliente(str(telefono), mensaje.title(), str(cedula_actual))
         
                     if success:
@@ -822,18 +863,12 @@ def webhook_whatsapp():
                 return jsonify({"status": "nombre actualizado"}), 200
             
             elif etapa == "actualizando_direccion":
-                print("🔧 Procesando actualización de dirección...")
                 if len(mensaje) < 5:
                     enviar_mensaje(telefono, "❌ La dirección debe tener al menos 5 caracteres.\n\nIngresa una dirección válida:")
                     return jsonify({"status": "invalid address"}), 200
     
                 try:
-                    # Obtener cédula del usuario para verificación
                     cedula_actual = SESIONES_ACTIVAS[telefono].get("cedula")
-                    print(f"🔑 Verificando con cédula: {cedula_actual}")
-        
-                    # Actualizar en base de datos
-                    print(f"🔄 Actualizando dirección a: {mensaje}")
                     success = BDC.actualizar_direccion_cliente(telefono, mensaje, cedula_actual)
         
                     if success:
@@ -855,14 +890,11 @@ def webhook_whatsapp():
                 return jsonify({"status": "direccion actualizada"}), 200
             
             elif etapa == "verificando_cedula_actual":
-                print("🔧 Procesando verificación de cédula actual...")
                 if not validar_cedula(mensaje):
                     enviar_mensaje(telefono, "❌ Cédula inválida. Debe tener entre 6 y 10 dígitos.\n\nIngresa tu cédula actual:")
                     return jsonify({"status": "invalid cedula"}), 200
     
-                # Verificar que la cédula ingresada coincida con la almacenada
                 try:
-                    print(f"🔑 Verificando cédula: {mensaje}")
                     cedula_coincide = BDC.verificar_cedula_cliente(telefono, mensaje)
         
                     if cedula_coincide:
@@ -882,18 +914,12 @@ def webhook_whatsapp():
                 return jsonify({"status": "cedula verificada"}), 200
             
             elif etapa == "actualizando_cedula":
-                print("🔧 Procesando actualización de cédula...")
                 if not validar_cedula(mensaje):
                     enviar_mensaje(telefono, "❌ Cédula inválida. Debe tener entre 6 y 10 dígitos.\n\nIngresa una cédula válida:")
                     return jsonify({"status": "invalid cedula"}), 200
     
                 try:
-                    # Obtener cédula actual del usuario para verificación
                     cedula_actual = SESIONES_ACTIVAS[telefono].get("cedula")
-                    print(f"🔑 Verificando con cédula actual: {cedula_actual}")
-        
-                    # Actualizar en base de datos
-                    print(f"🔄 Actualizando cédula a: {mensaje}")
                     success = BDC.actualizar_cedula_cliente(str(telefono), mensaje, str(cedula_actual))
         
                     if success:
@@ -917,7 +943,6 @@ def webhook_whatsapp():
             
             # === PROCESO DE INICIO DE SESIÓN ===
             elif etapa == "iniciando_sesion":
-                print("🔧 Procesando inicio de sesión...")
                 if not validar_cedula(mensaje):
                     enviar_mensaje(telefono, "❌ Cédula inválida. Debe tener entre 6 y 10 dígitos.\n\nPor favor, ingresa tu cédula nuevamente:")
                     return jsonify({"status": "invalid cedula"}), 200
@@ -949,7 +974,6 @@ def webhook_whatsapp():
 
             # === PROCESO DE REGISTRO ===
             elif etapa == "pidiendo_nombre":
-                print("🔧 Procesando registro - nombre...")
                 if len(mensaje) < 2:
                     enviar_mensaje(telefono, "❌ El nombre debe tener al menos 2 caracteres.\n\nIngresa tu nombre completo:")
                     return jsonify({"status": "invalid name"}), 200
@@ -960,7 +984,6 @@ def webhook_whatsapp():
                 return jsonify({"status": "ask direccion"}), 200
 
             elif etapa == "pidiendo_direccion":
-                print("🔧 Procesando registro - dirección...")
                 if len(mensaje) < 5:
                     enviar_mensaje(telefono, "❌ La dirección debe tener al menos 5 caracteres.\n\nIngresa una dirección válida:")
                     return jsonify({"status": "invalid address"}), 200
@@ -971,7 +994,6 @@ def webhook_whatsapp():
                 return jsonify({"status": "ask cedula"}), 200
 
             elif etapa == "pidiendo_cedula":
-                print("🔧 Procesando registro - cédula...")
                 if not validar_cedula(mensaje):
                     enviar_mensaje(telefono, "❌ Cédula inválida. Debe tener entre 6 y 10 dígitos.\n\nIngresa tu cédula:")
                     return jsonify({"status": "invalid cedula"}), 200
@@ -1008,7 +1030,6 @@ def webhook_whatsapp():
 
             # === PROCESO DE EDICIÓN DE CARRITO ===
             elif etapa == "editando_cantidad":
-                print("🔧 Procesando edición de cantidad...")
                 try:
                     nueva_cantidad = int(mensaje)
                     producto_id = USUARIOS[telefono]["producto_id"]
@@ -1033,30 +1054,22 @@ def webhook_whatsapp():
                 return jsonify({"status": "sesion cerrada"}), 200
 
             elif mensaje == "actualizar_datos":
-                print("🔄 Usuario seleccionó actualizar datos")
                 enviar_menu_actualizacion(telefono)
                 return jsonify({"status": "menu actualizacion"}), 200
             
-            # LAS OPCIONES DE ACTUALIZACIÓN ESPECÍFICAS DEBEN ESTAR AQUÍ
             elif mensaje == "actualizar_nombre":
-                print("📝 Iniciando actualización de nombre")
                 enviar_mensaje(telefono, "✏️ *Actualizar Nombre*\n\nIngresa tu nuevo nombre completo:")
-                USUARIOS[telefono] = {"etapa": "actualizando_nombre"}  # ✅ AHORA SÍ SE GUARDA
-                print(f"✅ Usuario {telefono} en etapa: actualizando_nombre")
+                USUARIOS[telefono] = {"etapa": "actualizando_nombre"}
                 return jsonify({"status": "actualizando nombre"}), 200
             
             elif mensaje == "actualizar_direccion":
-                print("📝 Iniciando actualización de dirección")
                 enviar_mensaje(telefono, "✏️ *Actualizar Dirección*\n\nIngresa tu nueva dirección completa:")
                 USUARIOS[telefono] = {"etapa": "actualizando_direccion"}
-                print(f"✅ Usuario {telefono} en etapa: actualizando_direccion")
                 return jsonify({"status": "actualizando direccion"}), 200
             
             elif mensaje == "actualizar_cedula":
-                print("📝 Iniciando actualización de cédula")
                 enviar_mensaje(telefono, "🔐 *Verificación de Seguridad*\n\nPor tu seguridad, primero debes confirmar tu cédula actual.\n\nIngresa tu cédula actual (6-10 dígitos):")
                 USUARIOS[telefono] = {"etapa": "verificando_cedula_actual"}
-                print(f"✅ Usuario {telefono} en etapa: verificando_cedula_actual")
                 return jsonify({"status": "verificando cedula"}), 200
             
             elif mensaje == "cancelar_actualizacion":
@@ -1065,59 +1078,25 @@ def webhook_whatsapp():
                 enviar_menu_logueado(telefono, nombre)
                 return jsonify({"status": "actualizacion cancelada"}), 200
 
-            elif mensaje == "menu_principal":
-                enviar_menu_principal(telefono)
-                return jsonify({"status": "menu principal"}), 200
-            
-            elif mensaje == "ver_menu":
-                enviar_menu_pdf(telefono)
-                enviar_menu_productos(telefono)
-                return jsonify({"status": "ver menu"}), 200
-            
-            elif mensaje == "informacion":
-                info_texto = """ℹ️ *Información - Mezón Peruano* 🇵🇪
+        # === MANEJO DE CATEGORÍAS Y PRODUCTOS ===
+        if mensaje.startswith("categoria_"):
+            categoria = mensaje.replace("categoria_", "")
+            print(f"📂 Categoría seleccionada: {categoria}")
+            enviar_productos_categoria(telefono, categoria)
+            return jsonify({"status": "categoria seleccionada"}), 200
 
-🍽️ Auténtico sabor peruano en cada plato
+        elif mensaje.startswith("producto_"):
+            producto_id = int(mensaje.replace("producto_", ""))
+            print(f"🍽️ Producto seleccionado: {producto_id}")
+            # Agregar directamente al carrito
+            success, mensaje_respuesta = agregar_al_carrito(telefono, producto_id)
+            enviar_mensaje(telefono, mensaje_respuesta)
+            time.sleep(1)
+            enviar_menu_principal(telefono)
+            return jsonify({"status": "producto agregado"}), 200
 
-📍 *Dirección:* Casa Terrarosa - Zipaquirá, Cundinamarca
-📞 *Teléfono:* +1-234-567-8900
-🕒 *Horario:* 11:00 AM - 9:00 PM
-📅 *Abierto:* Lunes a Domingo
-
-        ¡Te esperamos! 🎉"""
-
-                enviar_mensaje(telefono, info_texto)
-                nombre = SESIONES_ACTIVAS[telefono].get("nombre")
-                enviar_menu_logueado(telefono, nombre)
-                return jsonify({"status": "info"}), 200
-
-            elif mensaje == "mi_informacion":
-                try:
-                    cliente = BDC.buscar_cliente(telefono)
-                    if cliente:
-                        info_msg = f"📋 *Tu Información Completa*\n\n"
-                        info_msg += f"👤 *Nombre:* {cliente.get('nombre', 'No disponible')}\n"
-                        info_msg += f"📞 *Teléfono:* {telefono}\n"
-                        info_msg += f"🏠 *Dirección:* {cliente.get('direccion', 'No disponible')}\n"
-                        enviar_mensaje(telefono, info_msg)
-                    else:
-                        enviar_mensaje(telefono, "❌ No se pudo obtener tu información.")
-                except Exception as e:
-                    print(f"🔴 Error obteniendo información: {e}")
-                    enviar_mensaje(telefono, "❌ Error al consultar información.")
-                
-                sesion = SESIONES_ACTIVAS[telefono]
-                enviar_menu_logueado(telefono, sesion.get('nombre'))
-                return jsonify({"status": "informacion mostrada"}), 200
-
-            else:
-                # Si el usuario está logueado pero envía otro mensaje, mostrar menú logueado
-                nombre = SESIONES_ACTIVAS[telefono].get("nombre")
-                enviar_menu_logueado(telefono, nombre)
-                return jsonify({"status": "menu logueado"}), 200
-
-        # === OPCIONES DEL MENÚ INTERACTIVO (cuando NO está en proceso) ===
-        if mensaje == "iniciar_sesion":
+        # === OPCIONES PRINCIPALES ===
+        elif mensaje == "iniciar_sesion":
             enviar_mensaje(telefono, "🔐 *Inicio de Sesión*\n\nPor favor, ingresa tu *número de cédula* (6-10 dígitos):")
             USUARIOS[telefono] = {"etapa": "iniciando_sesion"}
             return jsonify({"status": "login started"}), 200
@@ -1133,7 +1112,8 @@ def webhook_whatsapp():
 
         elif mensaje == "ver_menu":
             enviar_menu_pdf(telefono)
-            enviar_menu_productos(telefono)
+            time.sleep(1)
+            enviar_menu_categorias(telefono)
             return jsonify({"status": "ver menu"}), 200
 
         elif mensaje == "informacion":
@@ -1156,13 +1136,8 @@ def webhook_whatsapp():
             enviar_menu_carrito(telefono)
             return jsonify({"status": "ver carrito"}), 200
 
-        elif mensaje.startswith("producto_"):
-            # Mostrar detalles del producto y agregar al carrito automáticamente
-            enviar_detalle_producto(telefono, mensaje)
-            return jsonify({"status": "producto agregado"}), 200
-        
         elif mensaje == "agregar_producto":
-            enviar_menu_productos(telefono)
+            enviar_menu_categorias(telefono)
             return jsonify({"status": "agregar producto"}), 200
 
         elif mensaje == "editar_carrito":
@@ -1173,26 +1148,21 @@ def webhook_whatsapp():
             enviar_menu_carrito(telefono)
             return jsonify({"status": "volver carrito"}), 200
 
+        elif mensaje == "volver_categorias":
+            enviar_menu_categorias(telefono)
+            return jsonify({"status": "volver categorias"}), 200
+
         elif mensaje == "volver_menu_principal":
-            if telefono in SESIONES_ACTIVAS:
-                nombre = SESIONES_ACTIVAS[telefono].get("nombre")
-                enviar_menu_logueado(telefono, nombre)
-            else:
-                enviar_menu_principal(telefono)
+            enviar_menu_principal(telefono)
             return jsonify({"status": "volver menu principal"}), 200
 
         elif mensaje == "volver_menu":
-            if telefono in SESIONES_ACTIVAS:
-                nombre = SESIONES_ACTIVAS[telefono].get("nombre")
-                enviar_menu_logueado(telefono, nombre)
-            else:
-                enviar_menu_principal(telefono)
+            enviar_menu_principal(telefono)
             return jsonify({"status": "volver menu"}), 200
 
         # Manejar edición de cantidades
         elif mensaje.startswith("editar_cantidad_"):
             producto_id = int(mensaje.replace("editar_cantidad_", ""))
-            # Guardar en USUARIOS que estamos editando la cantidad
             USUARIOS[telefono] = {
                 "etapa": "editando_cantidad",
                 "producto_id": producto_id
@@ -1220,8 +1190,6 @@ def webhook_whatsapp():
                 enviar_menu_carrito(telefono)
                 return jsonify({"status": "carrito vacio"}), 200
             
-            # Aquí iría la lógica para guardar en tu base de datos
-            # Por ahora solo un mensaje de confirmación
             total = calcular_total_carrito(telefono)
             mensaje_confirmacion = f"""✅ *Pedido Confirmado* 🎉
 
@@ -1240,9 +1208,7 @@ def webhook_whatsapp():
             vaciar_carrito(telefono)
             
             time.sleep(2)
-            if telefono in SESIONES_ACTIVAS:
-                nombre = SESIONES_ACTIVAS[telefono].get("nombre")
-                enviar_menu_logueado(telefono, nombre)
+            enviar_menu_principal(telefono)
             
             return jsonify({"status": "pedido confirmado"}), 200
 
@@ -1251,6 +1217,27 @@ def webhook_whatsapp():
             time.sleep(1)
             enviar_menu_carrito(telefono)
             return jsonify({"status": "descripcion"}), 200
+
+        elif mensaje == "mi_informacion":
+            try:
+                cliente = BDC.buscar_cliente(telefono)
+                if cliente:
+                    info_msg = f"📋 *Tu Información Completa*\n\n"
+                    info_msg += f"👤 *Nombre:* {cliente.get('nombre', 'No disponible')}\n"
+                    info_msg += f"📞 *Teléfono:* {telefono}\n"
+                    info_msg += f"🏠 *Dirección:* {cliente.get('direccion', 'No disponible')}\n"
+                    enviar_mensaje(telefono, info_msg)
+                else:
+                    enviar_mensaje(telefono, "❌ No se pudo obtener tu información.")
+            except Exception as e:
+                print(f"🔴 Error obteniendo información: {e}")
+                enviar_mensaje(telefono, "❌ Error al consultar información.")
+            
+            if telefono in SESIONES_ACTIVAS:
+                nombre = SESIONES_ACTIVAS[telefono].get("nombre")
+                enviar_menu_logueado(telefono, nombre)
+            
+            return jsonify({"status": "informacion mostrada"}), 200
 
         # === MENSAJE DE BIENVENIDA ===
         if mensaje in ["hola", "hi", "hello", "menú", "menu", "opciones", "inicio"]:
@@ -1276,4 +1263,6 @@ if __name__ == "__main__":
     print("📍 Webhook: /webhook/")
     print("✨ Menús interactivos habilitados (Select Box)")
     print("🛒 Sistema de carrito de compras activado")
+    print("📂 Navegación por categorías implementada")
+    print("⚠️  Límites implementados: máximo 10 filas por menú")
     app.run(debug=True, host="0.0.0.0", port=5000)
