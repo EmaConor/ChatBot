@@ -9,7 +9,7 @@ const PORT = 3001;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static('.'));
+app.use(express.static('__dirname'));
 
 // Configuración de la base de datos
 const DB_PATH = path.join(__dirname, 'DataBases', 'MezonPeruano.db');
@@ -35,10 +35,23 @@ if (!dbCheck) {
   console.log('✅ Conexión a BD verificada al inicio');
 }
 
-// Ruta principal
-app.get('/', (req, res) => {
+// ✅ IMPORTANTE: Esta ruta debe ir ANTES de las APIs
+app.get('/dashboard', (req, res) => {
+  console.log('📁 Sirviendo dashboard principal');
   res.sendFile(path.join(__dirname, 'index.html'));
 });
+
+// ✅ Para React Router - captura todas las rutas bajo /dashboard
+app.get('/dashboard/*', (req, res) => {
+  console.log('📁 Sirviendo ruta del dashboard:', req.path);
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.get('/', (req, res) => {
+  console.log('🔀 Redirigiendo raíz a /dashboard');
+  res.redirect('/dashboard');
+});
+
 
 // Ruta de salud
 app.get('/api/health', (req, res) => {
@@ -273,6 +286,19 @@ app.get('/api/pedidos/:id/items', (req, res) => {
       res.json(items || []);
     }
   });
+});
+
+
+
+// Manejo de errores 404 para APIs
+app.use('/api/*', (req, res) => {
+  res.status(404).json({ error: 'API route not found: ' + req.originalUrl });
+});
+
+// Ruta catch-all para SPA
+app.get('*', (req, res) => {
+  console.log('🎯 Catch-all route:', req.path);
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // Manejo de errores 404

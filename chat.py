@@ -13,7 +13,7 @@ import pytz
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
-TOKEN = "EAApdsnrt0rUBPZB0R1nnOctj4kOfveMT46tsWRnP6rYjrbS1MG3ZCfZB8Pn0nBcCBnhvjsc6e75oZCqf05kmr4XUoZBa0DBjK3kDY4OwjejIHLJJPv3DAQigMDZADfbbyS37xk4g4E6ZBbkq00t5y3KZBLB2oLrJAh9CwomOOwROYYNMkyEuZCzhBolECBiy9SgCOyuME3XbXxIIRkaZAYJSUaJDIZBEOPGZBVmPPB6ZAZCMoEMvWTIx63xNA0ZAn8yckZApY7SEkwSsZCSMcF5mZCBZAoTdn2U"
+TOKEN = "EAApdsnrt0rUBP1G1qAOB5hmKasvEKf024GEe919CEIsv4CHB8J5ZBrQpDvFtEomG4WsuwrUlxUp6cvcKvZB3C0pvRIiUKrIXleVZAWou9514E1H8v03ZB0JN7FESrzF6ZCl3T6j6ZA6gh7HF0bdq9aYZBWpzZCwIZAsc4yCiaV2pLKCDtpQkeM7oI3GhZBNCIibNPoulL8SyZC3Fxi8Fa4um2jZCGNrYstecXpFC92MkTciZBcV7gbAZDZD"
 PHONE_NUMBER_ID = "863285753529334"
 
 # === BASE DE DATOS TEMPORAL ===
@@ -93,7 +93,7 @@ def webhook_redirect():
 
 # === CONFIGURACIÓN DE HORARIO ===
 HORARIO_APERTURA = dt_time(11, 0)   # 11:00 AM
-HORARIO_CIERRE = dt_time(21, 0)    # 9:00 PM
+HORARIO_CIERRE = dt_time(23, 0)    # 9:00 PM
 ZONA_HORARIA = pytz.timezone('America/Bogota')
 
 def esta_en_horario_servicio():
@@ -1410,25 +1410,28 @@ def webhook_whatsapp():
                 return jsonify({"status": "login requerido"}), 200
             
             carrito = obtener_carrito(telefono)
+            
             if not carrito:
                 enviar_mensaje(telefono, "❌ Tu carrito está vacío")
                 enviar_menu_carrito(telefono)
                 return jsonify({"status": "carrito vacio"}), 200
             
+            total = calcular_total_carrito(telefono)
+            notas_pedido = NOTAS_PRODUCTOS.get(telefono, {}).copy()
+
             # Guardar pedido en la base de datos
             success, mensaje_respuesta = guardar_pedido_en_bd(telefono)
             enviar_mensaje(telefono, mensaje_respuesta)
             
             if success:
                 # Mostrar resumen del pedido guardado
-                total = calcular_total_carrito(telefono)  # Antes de vaciar el carrito
                 mensaje_confirmacion = f"""✅ *Pedido Confirmado* 🎉
 
 🛒 *Resumen de tu pedido:*
 """
                 for item in carrito:
                     subtotal = item["precio"] * item["cantidad"]
-                    nota = obtener_nota_producto(telefono, item["producto_id"])
+                    nota = notas_pedido.get(item["producto_id"], "")
                     mensaje_confirmacion += f"• {item['nombre']} x{item['cantidad']} = ${subtotal:,}"
                     if nota:
                         mensaje_confirmacion += f" (Nota: {nota})"
