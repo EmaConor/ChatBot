@@ -1,5 +1,14 @@
 # ChatBot con menús interactivos (select box) en WhatsApp
 from flask import Flask, jsonify, request, redirect
+
+import sys
+import os
+
+# Obtener la ruta absoluta al directorio raíz 
+ROOT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# Agregar al path de Python
+sys.path.append(ROOT_PATH)
+
 import DataBases.ClientesController as BDC
 import DataBases.productsController as DBP
 import DataBases.PedidosController as DBPedidos

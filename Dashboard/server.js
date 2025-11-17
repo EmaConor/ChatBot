@@ -12,7 +12,7 @@ app.use(express.json());
 app.use(express.static('__dirname'));
 
 // Configuración de la base de datos
-const DB_PATH = path.join(__dirname, 'DataBases', 'MezonPeruano.db');
+const DB_PATH = path.join(__dirname, '..', 'DataBases', 'MezonPeruano.db');
 
 function connectDB() {
   return new sqlite3.Database(DB_PATH, (err) => {
