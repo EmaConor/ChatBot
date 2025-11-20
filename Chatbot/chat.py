@@ -22,7 +22,7 @@ import pytz
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
-TOKEN = "EAApdsnrt0rUBP1G1qAOB5hmKasvEKf024GEe919CEIsv4CHB8J5ZBrQpDvFtEomG4WsuwrUlxUp6cvcKvZB3C0pvRIiUKrIXleVZAWou9514E1H8v03ZB0JN7FESrzF6ZCl3T6j6ZA6gh7HF0bdq9aYZBWpzZCwIZAsc4yCiaV2pLKCDtpQkeM7oI3GhZBNCIibNPoulL8SyZC3Fxi8Fa4um2jZCGNrYstecXpFC92MkTciZBcV7gbAZDZD"
+TOKEN = "EAApdsnrt0rUBP4KGaj3kIEB0Xs2t0ZCZC8eknLZCUFSNYfIQt78zdqHxZAx0j7Dx4Ubt7cMtZCgZC1g5z9nFOKXM2VZCZApgffPqls1ZCQQPCCr0uZCmhSRZB2wTUXnS8MnLGDxkHYbgBLuhxTZAVhXc6ZATPvFVSfjm0x7xbfK3F2oo6jyOUCiW3MtM22yZBnC4DQgHjHMooXHfTc3mTlyrZBg5CZAZBCHlGynC8YSw5Fpge"
 PHONE_NUMBER_ID = "863285753529334"
 
 # === BASE DE DATOS TEMPORAL ===
@@ -393,11 +393,18 @@ def enviar_menu_interactivo(numero, titulo_boton, texto_cuerpo, secciones):
 
 def enviar_menu_principal(numero):
     """Menú principal con opciones de login, registro, menú e información"""
-    if numero in SESIONES_ACTIVAS:
-        nombre = SESIONES_ACTIVAS[numero].get("nombre")
+    if usuario_ya_registrado(numero):
+        nombre = None
+        if numero in SESIONES_ACTIVAS:
+            nombre = SESIONES_ACTIVAS[numero].get("nombre")
+        else:
+            cliente = BDC.buscar_cliente(numero)
+            if cliente:
+                nombre = cliente.get("nombre")
         enviar_menu_logueado(numero, nombre)
         return True
-    
+
+    # User is not registered
     carrito = obtener_carrito(numero)
     items_carrito = len(carrito) if carrito else 0
     
@@ -426,14 +433,14 @@ def enviar_menu_principal(numero):
                     "description": "Consulta nuestros productos"
                 },
                 {
-                    "id": "informacion",
-                    "title": "Información",
-                    "description": "Sobre nosotros"
-                },
-                {
                     "id": "ver_carrito",
                     "title": f"🛒 Carrito ({items_carrito})",
                     "description": f"Ver tus productos ({items_carrito} items)"
+                },
+                {
+                    "id": "informacion",
+                    "title": "Información",
+                    "description": "Sobre nosotros"
                 }
             ]
         }
@@ -462,18 +469,21 @@ def enviar_menu_logueado(numero, nombre_usuario=None):
                     "description": "Consulta nuestros productos"
                 },
                 {
-                    "id": "informacion",
-                    "title": "Información",
-                    "description": "Sobre nosotros"
-                },
-                {
                     "id": "ver_carrito",
                     "title": f"🛒 Carrito ({items_carrito})",
                     "description": f"Ver tus productos ({items_carrito} items)"
+                },
+                {
+                    "id": "informacion",
+                    "title": "Información",
+                    "description": "Sobre nosotros"
                 }
             ]
-        },
-        {
+        }
+    ]
+
+    if numero in SESIONES_ACTIVAS:
+        secciones.append({
             "title": "👤 Mi Cuenta",
             "rows": [
                 {
@@ -492,13 +502,28 @@ def enviar_menu_logueado(numero, nombre_usuario=None):
                     "description": "Salir de mi cuenta"
                 }
             ]
-        }
-    ]
-    
+        })
+        body_text = f"{saludo} - *Sesión Activa* 🎉\n\n¿Qué deseas hacer?"
+    else:
+        # User is registered but not logged in.
+        # Add a "login" button.
+        secciones.append({
+            "title": "🔐 Acceso",
+            "rows": [
+                {
+                    "id": "iniciar_sesion",
+                    "title": "Iniciar Sesión",
+                    "description": "Accede con tu cuenta"
+                }
+            ]
+        })
+        body_text = f"{saludo}\n\nPara acceder a tu cuenta, por favor inicia sesión."
+
+
     return enviar_menu_interactivo(
         numero,
         "⚙️ Opciones",
-        f"{saludo} - *Sesión Activa* 🎉\n\n¿Qué deseas hacer?",
+        body_text,
         secciones
     )
 
@@ -591,18 +616,13 @@ def enviar_menu_carrito(numero):
                 {
                     "id": "editar_carrito",
                     "title": "✏️ Editar Carrito",
-                    "description": "Modificar cantidades o eliminar"
+                    "description": "Agregar notas - Modificar cantidades o eliminar"
                 }
             ]
         },
         {
             "title": "📝 Información",
             "rows": [
-                {
-                    "id": "agregar_notas",
-                    "title": "📄 Agregar Notas",
-                    "description": "Añadir notas a los productos"
-                },
                 {
                     "id": "volver_menu_principal",
                     "title": "🔙 Menú Principal",
@@ -1201,6 +1221,23 @@ def webhook_whatsapp():
                 
                 return jsonify({"status": "registro completo"}), 200
 
+            # === PROCESO DE AGREGAR PRODUCTO CON CANTIDAD ===
+            elif etapa == "pidiendo_cantidad":
+                try:
+                    cantidad = int(mensaje)
+                    if cantidad > 0:
+                        producto_id = USUARIOS[telefono]["producto_id"]
+                        success, mensaje_respuesta = agregar_al_carrito(telefono, producto_id, cantidad)
+                        enviar_mensaje(telefono, mensaje_respuesta)
+                        del USUARIOS[telefono]
+                        time.sleep(1)
+                        enviar_menu_principal(telefono)
+                    else:
+                        enviar_mensaje(telefono, "❌ La cantidad debe ser un número positivo.")
+                except ValueError:
+                    enviar_mensaje(telefono, "❌ Por favor ingresa un número válido para la cantidad.")
+                return jsonify({"status": "cantidad procesada"}), 200
+
             # === PROCESO DE EDICIÓN DE CARRITO ===
             elif etapa == "editando_cantidad":
                 try:
@@ -1271,12 +1308,15 @@ def webhook_whatsapp():
         elif mensaje.startswith("producto_"):
             producto_id = int(mensaje.replace("producto_", ""))
             print(f"🍽️ Producto seleccionado: {producto_id}")
-            # Agregar directamente al carrito
-            success, mensaje_respuesta = agregar_al_carrito(telefono, producto_id)
-            enviar_mensaje(telefono, mensaje_respuesta)
-            time.sleep(1)
-            enviar_menu_principal(telefono)
-            return jsonify({"status": "producto agregado"}), 200
+            
+            # Guardar el producto y pedir la cantidad
+            USUARIOS[telefono] = {
+                "etapa": "pidiendo_cantidad",
+                "producto_id": producto_id
+            }
+            enviar_mensaje(telefono, "🔢 ¿Qué cantidad deseas agregar al carrito?")
+            
+            return jsonify({"status": "pidiendo cantidad"}), 200
 
         # === OPCIONES PRINCIPALES ===
         elif mensaje == "iniciar_sesion":
