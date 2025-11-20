@@ -22,7 +22,7 @@ import pytz
 app = Flask(__name__)
 
 # === CONFIGURACIÓN ===
-TOKEN = "EAApdsnrt0rUBP4KGaj3kIEB0Xs2t0ZCZC8eknLZCUFSNYfIQt78zdqHxZAx0j7Dx4Ubt7cMtZCgZC1g5z9nFOKXM2VZCZApgffPqls1ZCQQPCCr0uZCmhSRZB2wTUXnS8MnLGDxkHYbgBLuhxTZAVhXc6ZATPvFVSfjm0x7xbfK3F2oo6jyOUCiW3MtM22yZBnC4DQgHjHMooXHfTc3mTlyrZBg5CZAZBCHlGynC8YSw5Fpge"
+TOKEN = "EAApdsnrt0rUBQNI3XSiZCoCVGoYLw3QHHoZCWiyfAYcPzU1x5de07uHdkLwG0bxu0WeRxpnZBfFJKZCz42B00grVnZB1rTk6vQmVTNHcZB8UFG4RJeZCbXCtYKWjZCN4JZAI4c2mUigENrCiqtO9AtoZACKt3c997GbIHR39rmRWmY4arJPLRnFO0tRjH0WvpMbxZAdftUYtVIcZBz4zIU37Q8p5TJPZAtEPzPXfdf4F8zChlGRMqLhSSCX8MA24PvJPUvHGki85WcWgVWqj8GoYSIHZB2YMs4"
 PHONE_NUMBER_ID = "863285753529334"
 
 # === BASE DE DATOS TEMPORAL ===
@@ -1231,7 +1231,7 @@ def webhook_whatsapp():
                         enviar_mensaje(telefono, mensaje_respuesta)
                         del USUARIOS[telefono]
                         time.sleep(1)
-                        enviar_menu_principal(telefono)
+                        enviar_menu_categorias(telefono)
                     else:
                         enviar_mensaje(telefono, "❌ La cantidad debe ser un número positivo.")
                 except ValueError:
